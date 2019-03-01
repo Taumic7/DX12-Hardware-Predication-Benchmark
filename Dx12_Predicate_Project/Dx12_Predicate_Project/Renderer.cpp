@@ -14,7 +14,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 
-Renderer::Renderer(HINSTANCE hInstance, LONG width, LONG height)
+Renderer::Renderer(HINSTANCE hInstance, int width, int height)
 {
 	try
 	{
@@ -28,13 +28,20 @@ Renderer::Renderer(HINSTANCE hInstance, LONG width, LONG height)
 		CreateShaders();
 		CreateRootSignature();
 		CreatePSO();
-		CreateVertexBufferAndVertexData(100, 100);
+
+		const int set = 10;
+		const float ratio = (float)height / width;
+
+		for (int i = 0; i < 3; i++)
+		{
+			states[i] = CreateTestState(set * (i+1), set * ratio * (i+1));
+		}
 	}
 	catch (const char* e)
 	{
 		std::cout << e << std::endl;
 	}
-}
+};
 
 Renderer::~Renderer()
 {
@@ -42,58 +49,21 @@ Renderer::~Renderer()
 
 void Renderer::Run()
 {
-	MSG msg;
-	BOOL bRet;
+	MSG msg = { 0 };
 
-	while ((bRet = GetMessage(&msg, NULL, 0, 0)) != 0)
+	while (WM_QUIT != msg.message)
 	{
-		if (bRet == -1)
-		{
-			// handle the error and possibly exit
-		}
-		else
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
 		{
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-		this->waitForGPU();
-		directQueueAlloc->Reset();
-		directList->Reset(directQueueAlloc, this->PSO);
-
-		directList->SetGraphicsRootSignature(rootSignature);
-
-		directList->RSSetViewports(1, &viewport);
-		directList->RSSetScissorRects(1, &scissorRect);
-		directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
-		directList->IASetVertexBuffers(0, 1, &vertexBufferView);
-
-		SetResourceTransitionBarrier(directList,
-			renderTargets[currentRenderTarget],
-			D3D12_RESOURCE_STATE_PRESENT,		//state before
-			D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
-		);
-
-		D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
-		cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
-		directList->OMSetRenderTargets(1, &cdh, true, nullptr);
-		directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
-
-		for (int i = 0; i < this->numberOfObjects; i++)
+		else
 		{
-			directList->DrawInstanced(1, 1, i, 0);
+			this->waitForGPU();
+
+			renderTest(states[0]);
 		}
-		SetResourceTransitionBarrier(directList,
-			renderTargets[currentRenderTarget],
-			D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
-			D3D12_RESOURCE_STATE_PRESENT		//state after
-		);
-		directList->Close();
-		
-		ID3D12CommandList* listsToExecute[] = { directList };
-		this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-
-		Present();
-
 	}
 }
 
@@ -382,10 +352,17 @@ void Renderer::CreatePSO()
 
 void Renderer::CreateRootSignature()
 {
+	D3D12_ROOT_PARAMETER  rootParam[1];
+	rootParam[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
+	rootParam[0].Constants.Num32BitValues = 2;
+	rootParam[0].Constants.RegisterSpace = 0;
+	rootParam[0].Constants.ShaderRegister = 0;
+	rootParam[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_GEOMETRY;
+
 	D3D12_ROOT_SIGNATURE_DESC rsDesc;
 	rsDesc.Flags = D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
-	rsDesc.NumParameters = 0;
-	rsDesc.pParameters = nullptr;
+	rsDesc.NumParameters = ARRAYSIZE(rootParam);
+	rsDesc.pParameters = rootParam;
 	rsDesc.NumStaticSamplers = 0;
 	rsDesc.pStaticSamplers = nullptr;
 
@@ -403,9 +380,9 @@ void Renderer::CreateRootSignature()
 		IID_PPV_ARGS(&rootSignature));
 }
 
-void Renderer::CreateVertexBufferAndVertexData(int width, int height)
+void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 {
-	this->numberOfObjects = width * height;
+	
 
 	D3D12_HEAP_PROPERTIES hp = {};
 	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -414,7 +391,7 @@ void Renderer::CreateVertexBufferAndVertexData(int width, int height)
 
 	D3D12_RESOURCE_DESC rd = {};
 	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-	rd.Width = width*height*sizeof(Vertex);
+	rd.Width = state->pointWidth * state->pointHeight * sizeof(Vertex);
 	rd.Height = 1;
 	rd.DepthOrArraySize = 1;
 	rd.MipLevels = 1;
@@ -427,29 +404,29 @@ void Renderer::CreateVertexBufferAndVertexData(int width, int height)
 		&rd,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
-		IID_PPV_ARGS(&vertexBufferResource))))
+		IID_PPV_ARGS(&state->vertexBufferResource))))
 	{
 		throw "Could not create Vertex Buffer";
 	}
 
 	// Initialise vertex buffer view
-	vertexBufferView.BufferLocation = vertexBufferResource->GetGPUVirtualAddress();
-	vertexBufferView.StrideInBytes = sizeof(Vertex);
-	vertexBufferView.SizeInBytes = width * height * sizeof(Vertex);
+	state->vertexBufferView.BufferLocation = state->vertexBufferResource->GetGPUVirtualAddress();
+	state->vertexBufferView.StrideInBytes = sizeof(Vertex);
+	state->vertexBufferView.SizeInBytes = state->pointWidth * state->pointHeight * sizeof(Vertex);
 
 
-	float wFloat = width, hFloat = height;
+	float wFloat = state->pointWidth, hFloat = state->pointHeight;
 	double widthIncrement = (float)2.0f / ((float)wFloat);
 	double heightIncrement = (float)2.0f / (float)hFloat;
 
-	Vertex* pointArr = new Vertex[width*height];
+	Vertex* pointArr = new Vertex[state->pointWidth * state->pointHeight];
 	float widthPos = -1 + widthIncrement / 2.f;
 	unsigned int counter = 0;
 
-	for (int i = 0; i < width; i++)
+	for (int i = 0; i < state->pointWidth; i++)
 	{
 		float heightPos = -1 + heightIncrement / 2.f;
-		for (int j = 0; j < height; j++)
+		for (int j = 0; j < state->pointHeight; j++)
 		{
 			pointArr[counter++] = { widthPos,heightPos };
 			heightPos += heightIncrement;
@@ -462,9 +439,11 @@ void Renderer::CreateVertexBufferAndVertexData(int width, int height)
 	void* dataBegin = nullptr;
 	D3D12_RANGE range = { 0,0 };
 
-	vertexBufferResource->Map(0, &range, &dataBegin);
-	memcpy(dataBegin, pointArr, width * height * sizeof(Vertex));
-	vertexBufferResource->Unmap(0, nullptr);
+	state->vertexBufferResource->Map(0, &range, &dataBegin);
+	memcpy(dataBegin, pointArr, state->pointWidth * state->pointHeight * sizeof(Vertex));
+	state->vertexBufferResource->Unmap(0, nullptr);
+
+	delete[]pointArr;
 }
 
 void Renderer::Present()
@@ -472,6 +451,79 @@ void Renderer::Present()
 	DXGI_PRESENT_PARAMETERS pp = {};
 	swapChain->Present1(0, 0, &pp);
 	currentRenderTarget = ++currentRenderTarget % NUM_SWAP_BUFFERS;
+}
+
+Renderer::TestState* Renderer::CreateTestState(int width, int height)
+{
+	TestState* newState = new TestState;
+	newState->numberOfObjects = width * height;
+	newState->pointWidth = width;
+	newState->pointHeight = height;
+
+	newState->pointSize[0] = (float)1.f / width;
+	newState->pointSize[1] = (float)1.f / height;
+
+	CreateVertexBufferAndVertexData(newState);
+
+	return newState;
+}
+
+void Renderer::renderTest(TestState* state)
+{
+	directQueueAlloc->Reset();
+	directList->Reset(directQueueAlloc, this->PSO);
+
+	directList->SetGraphicsRootSignature(rootSignature);
+
+	//if (decrease)
+	//{
+	//	pointSize[1] -= 0.0001f;
+	//	if (pointSize[1] <= 0.f)
+	//	{
+	//		decrease = false;
+	//	}
+	//}
+	//else
+	//{
+	//	pointSize[1] += 0.0001f;
+	//	if (pointSize[1] >= 0.3f)
+	//	{
+	//		decrease = true;
+	//	}
+	//}
+	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
+
+	directList->RSSetViewports(1, &viewport);
+	directList->RSSetScissorRects(1, &scissorRect);
+	directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
+	directList->IASetVertexBuffers(0, 1, &state->vertexBufferView);
+
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_PRESENT,		//state before
+		D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
+	);
+
+	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
+	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
+	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
+	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
+
+	for (int i = 0; i < state->numberOfObjects; i++)
+	{
+		directList->DrawInstanced(1, 1, i, 0);
+	}
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
+		D3D12_RESOURCE_STATE_PRESENT		//state after
+	);
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+
+	Present();
 }
 
 void Renderer::waitForGPU()

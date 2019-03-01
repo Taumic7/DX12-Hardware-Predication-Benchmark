@@ -26,14 +26,20 @@ const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
 class Renderer
 {
 public:
-	Renderer(HINSTANCE hInstance, LONG width, LONG height);
+	Renderer(HINSTANCE hInstance, int width, int height);
 	~Renderer();
 
 	void Run();
 
 private:
 
-	float clearColor[4] = { 0.2f,0.6f,0.3f,0 };
+	bool decrease = true;
+
+	float pointSize[3][2] = {};
+	int pointWidth[3], pointHeight[3];
+	unsigned int numberOfObjects[3] = { 0 };
+
+	float clearColor[4] = { 0.2f,0.2f,0.2f,1.0f };
 	UINT currentRenderTarget = 0;
 
 	struct Vertex
@@ -41,6 +47,18 @@ private:
 		float x, y; // Position
 	};
 
+	struct TestState
+	{
+		ID3D12Resource1*			vertexBufferResource = nullptr;
+		D3D12_VERTEX_BUFFER_VIEW	vertexBufferView = {};
+
+		float pointSize[2] = {};
+		int pointWidth, pointHeight;
+		unsigned int numberOfObjects = 0;
+	};
+
+
+	TestState* states[3] = {};
 
 	HWND			window;
 	D3D12_VIEWPORT	viewport = {};
@@ -55,8 +73,8 @@ private:
 	ID3D12Resource1*			renderTargets[NUM_SWAP_BUFFERS] = {};
 	UINT						renderTargetDescriptorSize = 0;
 
-	ID3D12Resource1*			vertexBufferResource = nullptr;
-	D3D12_VERTEX_BUFFER_VIEW	vertexBufferView = {};
+	//ID3D12Resource1*			vertexBufferResource[3] = {};
+	//D3D12_VERTEX_BUFFER_VIEW	vertexBufferView[3] = {};
 
 	ID3D12CommandQueue*			directQueue	= nullptr;
 	ID3D12CommandAllocator*		directQueueAlloc = nullptr;
@@ -84,10 +102,13 @@ private:
 	void CreateShaders();
 	void CreatePSO();
 	void CreateRootSignature();
-	void CreateVertexBufferAndVertexData(int width, int height);
+	void CreateVertexBufferAndVertexData(TestState* state);
 	void Present();
 
-	unsigned int numberOfObjects = 0;
+	TestState* CreateTestState(int width, int height);
+	void renderTest(TestState* state);
+
+
 
 	void waitForGPU();
 
