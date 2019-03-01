@@ -22,12 +22,13 @@ Renderer::Renderer(HINSTANCE hInstance, LONG width, LONG height)
 		CreateDevice();
 		CreateCMDInterface();
 		CreateSwapChain();
+		CreateFence();
 		CreateRenderTargets();
 		CreateViewportAndScissorRect(width, height);
 		CreateShaders();
-		CreatePSO();
 		CreateRootSignature();
-		CreateVertexBufferAndVertexData(10, 10);
+		CreatePSO();
+		CreateVertexBufferAndVertexData(100, 100);
 	}
 	catch (const char* e)
 	{
@@ -55,9 +56,9 @@ void Renderer::Run()
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
 		}
-
+		this->waitForGPU();
 		directQueueAlloc->Reset();
-		directList->Reset(directQueueAlloc, nullptr);
+		directList->Reset(directQueueAlloc, this->PSO);
 
 		directList->SetGraphicsRootSignature(rootSignature);
 
@@ -66,14 +67,33 @@ void Renderer::Run()
 		directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
 		directList->IASetVertexBuffers(0, 1, &vertexBufferView);
 
+		SetResourceTransitionBarrier(directList,
+			renderTargets[currentRenderTarget],
+			D3D12_RESOURCE_STATE_PRESENT,		//state before
+			D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
+		);
+
 		D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
 		cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
 		directList->OMSetRenderTargets(1, &cdh, true, nullptr);
 		directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
 
-		//directList->DrawInstanced(1, 1, //totodo, 0);
+		for (int i = 0; i < this->numberOfObjects; i++)
+		{
+			directList->DrawInstanced(1, 1, i, 0);
+		}
+		SetResourceTransitionBarrier(directList,
+			renderTargets[currentRenderTarget],
+			D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
+			D3D12_RESOURCE_STATE_PRESENT		//state after
+		);
+		directList->Close();
+		
+		ID3D12CommandList* listsToExecute[] = { directList };
+		this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 
 		Present();
+
 	}
 }
 
@@ -216,6 +236,14 @@ void Renderer::CreateSwapChain()
 	SafeRelease(&factory);
 }
 
+void Renderer::CreateFence()
+{
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
+	fenceValue = 1;
+	//Create an event handle to use for GPU synchronization.
+	eventHandle = CreateEvent(0, false, false, 0);
+}
+
 void Renderer::CreateRenderTargets()
 {
 	D3D12_DESCRIPTOR_HEAP_DESC dhd = {};
@@ -305,7 +333,7 @@ void Renderer::CreatePSO()
 {
 	////// Input Layout //////
 	D3D12_INPUT_ELEMENT_DESC inputElementDesc[] = {
-		{ "POSITION", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
+		{ "POS", 0, DXGI_FORMAT_R32G32_FLOAT, 0, 0, D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA, 0 },
 	};
 
 	D3D12_INPUT_LAYOUT_DESC inputLayoutDesc;
@@ -377,6 +405,8 @@ void Renderer::CreateRootSignature()
 
 void Renderer::CreateVertexBufferAndVertexData(int width, int height)
 {
+	this->numberOfObjects = width * height;
+
 	D3D12_HEAP_PROPERTIES hp = {};
 	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
 	hp.CreationNodeMask = 1;
@@ -408,9 +438,9 @@ void Renderer::CreateVertexBufferAndVertexData(int width, int height)
 	vertexBufferView.SizeInBytes = width * height * sizeof(Vertex);
 
 
-
-	LONGLONG widthIncrement = 2.0f / (float)width;
-	LONGLONG heightIncrement = 2.0f / (float)height;
+	float wFloat = width, hFloat = height;
+	double widthIncrement = (float)2.0f / ((float)wFloat);
+	double heightIncrement = (float)2.0f / (float)hFloat;
 
 	Vertex* pointArr = new Vertex[width*height];
 	float widthPos = -1 + widthIncrement / 2.f;
@@ -446,4 +476,33 @@ void Renderer::Present()
 
 void Renderer::waitForGPU()
 {
+	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+//This is code implemented as such for simplicity. The cpu could for example be used
+//for other tasks to prepare the next frame while the current one is being rendered.
+
+//Signal and increment the fence value.
+	const UINT64 fenceL = fenceValue;
+	directQueue->Signal(fence, fenceL);
+	fenceValue++;
+
+	//Wait until command queue is done.
+	if (fence->GetCompletedValue() < fenceL)
+	{
+		fence->SetEventOnCompletion(fenceL, eventHandle);
+		WaitForSingleObject(eventHandle, INFINITE);
+	}
+}
+
+void Renderer::SetResourceTransitionBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,
+	D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter)
+{
+	D3D12_RESOURCE_BARRIER barrierDesc = {};
+
+	barrierDesc.Type = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
+	barrierDesc.Transition.pResource = resource;
+	barrierDesc.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
+	barrierDesc.Transition.StateBefore = StateBefore;
+	barrierDesc.Transition.StateAfter = StateAfter;
+
+	commandList->ResourceBarrier(1, &barrierDesc);
 }

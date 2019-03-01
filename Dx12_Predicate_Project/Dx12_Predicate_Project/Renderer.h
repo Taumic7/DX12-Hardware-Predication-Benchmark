@@ -33,7 +33,7 @@ public:
 
 private:
 
-	float clearColor[4] = { 0,0,0,0 };
+	float clearColor[4] = { 0.2f,0.6f,0.3f,0 };
 	UINT currentRenderTarget = 0;
 
 	struct Vertex
@@ -78,6 +78,7 @@ private:
 	void CreateDevice();
 	void CreateCMDInterface();
 	void CreateSwapChain();
+	void CreateFence();
 	void CreateRenderTargets();
 	void CreateViewportAndScissorRect(LONG width, LONG height);
 	void CreateShaders();
@@ -86,7 +87,10 @@ private:
 	void CreateVertexBufferAndVertexData(int width, int height);
 	void Present();
 
+	unsigned int numberOfObjects = 0;
 
 	void waitForGPU();
+
+	void SetResourceTransitionBarrier(ID3D12GraphicsCommandList * commandList, ID3D12Resource * resource, D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter);
 
 };
