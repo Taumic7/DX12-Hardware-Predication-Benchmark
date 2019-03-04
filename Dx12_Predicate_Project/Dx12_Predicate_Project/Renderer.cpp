@@ -60,8 +60,8 @@ void Renderer::Run()
 		}
 		else
 		{
-			this->waitForGPU();
-
+			this->waitForDirectQueue();
+			this->waitForComputeQueue();
 			//UpdatePredicateData(states[0], 0, 8, 0);
 
 			renderTest(states[0]);
@@ -161,6 +161,21 @@ void Renderer::CreateCMDInterface()
 	//Command lists are created in the recording state. Since there is nothing to
 	//record right now and the main loop expects it to be closed, we close it.
 	directList->Close();
+	// -----------------------------------------------------------------
+	D3D12_COMMAND_QUEUE_DESC cqd2 = {};
+	cqd2.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
+	device->CreateCommandQueue(&cqd2, IID_PPV_ARGS(&computeQueue));
+
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeQueueAlloc));
+
+	device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_COMPUTE,
+		computeQueueAlloc,
+		nullptr,
+		IID_PPV_ARGS(&computeList));
+
+	computeList->Close();
 }
 
 void Renderer::CreateSwapChain()
@@ -215,6 +230,11 @@ void Renderer::CreateFence()
 	fenceValue = 1;
 	//Create an event handle to use for GPU synchronization.
 	eventHandle = CreateEvent(0, false, false, 0);
+
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence2));
+	fenceValue2 = 1;
+	//Create an event handle to use for GPU synchronization.
+	eventHandle2 = CreateEvent(0, false, false, 0);
 }
 
 void Renderer::CreateRenderTargets()
@@ -300,6 +320,20 @@ void Renderer::CreateShaders()
 						// how to use the Error blob, see here
 						// https://msdn.microsoft.com/en-us/library/windows/desktop/hh968107(v=vs.85).aspx
 	);
+
+	D3DCompileFromFile(
+		L"ComputeShader.hlsl", // filename
+		nullptr,		// optional macros
+		nullptr,		// optional include files
+		"CS_main",		// entry point
+		"cs_5_0",		// shader model (target)
+		0,				// shader compile options			// here DEBUGGING OPTIONS
+		0,				// effect compile options
+		&computeShader,		// double pointer to ID3DBlob		
+		nullptr			// pointer for Error Blob messages.
+						// how to use the Error blob, see here
+						// https://msdn.microsoft.com/en-us/library/windows/desktop/hh968107(v=vs.85).aspx
+	);
 }
 
 void Renderer::CreatePSO()
@@ -351,6 +385,30 @@ void Renderer::CreatePSO()
 	{
 		throw "Could not create Graphics PSO";
 	}
+
+	//--------------------------------------------------------
+	//// Retrieve the cached PSO blob
+	//ID3DBlob* cachedBlob;
+	//if (FAILED(this->computePSO->GetCachedBlob(&cachedBlob)))
+	//{
+	//	throw "Failed to get cached computePSO blob";
+	//}
+
+	//D3D12_CACHED_PIPELINE_STATE cachedPSO = {};
+	//cachedPSO.pCachedBlob = reinterpret_cast<void*>(cachedBlob->GetBufferPointer());
+	//cachedPSO.CachedBlobSizeInBytes = cachedBlob->GetBufferSize();
+
+	D3D12_COMPUTE_PIPELINE_STATE_DESC cPsd = {};
+	cPsd.pRootSignature = this->computeRootSignature;
+	cPsd.CS.pShaderBytecode = reinterpret_cast<void*>(this->computeShader->GetBufferPointer());
+	cPsd.CS.BytecodeLength = this->computeShader->GetBufferSize();
+	cPsd.NodeMask = 0; // Multi gpu stuff, dont touch
+	cPsd.Flags = D3D12_PIPELINE_STATE_FLAG_NONE;
+
+	if (FAILED(this->device->CreateComputePipelineState(&cPsd, IID_PPV_ARGS(&this->computePSO))))
+	{
+		throw "Failed to create compute PSO";
+	}
 }
 
 void Renderer::CreateRootSignature()
@@ -376,11 +434,46 @@ void Renderer::CreateRootSignature()
 		&sBlob,
 		nullptr);
 
-	device->CreateRootSignature(
+	if (FAILED(device->CreateRootSignature(
 		0,
 		sBlob->GetBufferPointer(),
 		sBlob->GetBufferSize(),
-		IID_PPV_ARGS(&rootSignature));
+		IID_PPV_ARGS(&rootSignature))))
+	{
+		throw "Could not create direct queue root signature";
+	}
+
+	//----------------------------
+
+	// Predicate buffer UAV
+	D3D12_ROOT_PARAMETER  rootParam2[1];
+	rootParam2[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
+	rootParam2[0].Descriptor.ShaderRegister = 0;
+	rootParam2[0].Descriptor.RegisterSpace = 0;
+	rootParam2[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+	D3D12_ROOT_SIGNATURE_DESC rsDesc2;
+	rsDesc2.NumParameters = ARRAYSIZE(rootParam2);
+	rsDesc2.pParameters = rootParam2;
+	rsDesc2.NumStaticSamplers = 0;
+	rsDesc2.pStaticSamplers = nullptr;
+	rsDesc2.Flags = D3D12_ROOT_SIGNATURE_FLAG_NONE;
+
+	ID3DBlob* sBlob2;
+	HRESULT hr = D3D12SerializeRootSignature(
+		&rsDesc2,
+		D3D_ROOT_SIGNATURE_VERSION_1,
+		&sBlob2,
+		nullptr);
+
+	if (FAILED(device->CreateRootSignature(
+		0,
+		sBlob2->GetBufferPointer(),
+		sBlob2->GetBufferSize(),
+		IID_PPV_ARGS(&computeRootSignature))))
+	{
+		throw "Could not create compute queue root signature";
+	}
 }
 
 void Renderer::CreateVertexBufferAndVertexData(TestState* state)
@@ -466,7 +559,7 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 		throw "Could not create Default Vertex Buffer";
 	}
 
-	waitForGPU();
+	waitForDirectQueue();
 	directList->Reset(directQueueAlloc, nullptr);
 
 	// Copy from upload buffer to default buffer
@@ -488,7 +581,7 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	ID3D12CommandList* listsToExecute[] = { directList };
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 
-	waitForGPU();
+	waitForDirectQueue();
 
 	delete[]pointArr;
 	SafeRelease(&uploadBuffer);
@@ -549,7 +642,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 		throw "Could not create Predicate Buffer";
 	}
 
-	waitForGPU();
+	waitForDirectQueue();
 
 	void* dataBegin = nullptr;
 	D3D12_RANGE range = { 0,0 };
@@ -559,7 +652,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	memset(dataBegin, (char)1, memSize/2.f);
 	state->predicateUploadResource->Unmap(0, nullptr);
 
-	waitForGPU();
+	waitForDirectQueue();
 	directList->Reset(directQueueAlloc, nullptr);
 
 	directList->CopyBufferRegion(state->predicateResource, 0, state->predicateUploadResource, 0, memSize);
@@ -601,10 +694,16 @@ Renderer::TestState* Renderer::CreateTestState(int width, int height)
 
 void Renderer::renderTest(TestState* state)
 {
+
 	directQueueAlloc->Reset();
 	directList->Reset(directQueueAlloc, this->PSO);
 
+	computeQueueAlloc->Reset();
+	computeList->Reset(computeQueueAlloc, this->computePSO);
+
+
 	directList->SetGraphicsRootSignature(rootSignature);
+	computeList->SetComputeRootSignature(this->computeRootSignature);
 
 	//if (decrease)
 	//{
@@ -623,6 +722,15 @@ void Renderer::renderTest(TestState* state)
 	//	}
 	//}
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
+	computeList->SetComputeRootUnorderedAccessView(0, state->predicateResource->GetGPUVirtualAddress());
+
+	//-----------------------------------------------
+
+	computeList->Dispatch(1, 1, 1);
+
+	//-----------------------------------------------
+
+
 
 	directList->RSSetViewports(1, &viewport);
 	directList->RSSetScissorRects(1, &scissorRect);
@@ -651,14 +759,18 @@ void Renderer::renderTest(TestState* state)
 		D3D12_RESOURCE_STATE_PRESENT		//state after
 	);
 	directList->Close();
+	computeList->Close();
 
 	ID3D12CommandList* listsToExecute[] = { directList };
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+
+	ID3D12CommandList* listsToExecute2[] = { computeList };
+	this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
 	
 	Present();
 }
 
-void Renderer::waitForGPU()
+void Renderer::waitForDirectQueue()
 {
 	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
 //This is code implemented as such for simplicity. The cpu could for example be used
@@ -674,6 +786,25 @@ void Renderer::waitForGPU()
 	{
 		fence->SetEventOnCompletion(fenceL, eventHandle);
 		WaitForSingleObject(eventHandle, INFINITE);
+	}
+}
+
+void Renderer::waitForComputeQueue()
+{
+	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+//This is code implemented as such for simplicity. The cpu could for example be used
+//for other tasks to prepare the next frame while the current one is being rendered.
+
+//Signal and increment the fence value.
+	const UINT64 fenceL = fenceValue;
+	computeQueue->Signal(fence2, fenceL);
+	fenceValue2++;
+
+	//Wait until command queue is done.
+	if (fence2->GetCompletedValue() < fenceL)
+	{
+		fence2->SetEventOnCompletion(fenceL, eventHandle2);
+		WaitForSingleObject(eventHandle2, INFINITE);
 	}
 }
 

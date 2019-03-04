@@ -73,6 +73,9 @@ private:
 	ID3D12RootSignature*	rootSignature = nullptr;
 	ID3D12PipelineState*	PSO = nullptr;
 
+	ID3D12RootSignature*		computeRootSignature = nullptr;
+	ID3D12PipelineState*		computePSO			 = nullptr;
+
 	ID3D12DescriptorHeap*		renderTargetsHeap = nullptr;
 	ID3D12Resource1*			renderTargets[NUM_SWAP_BUFFERS] = {};
 	UINT						renderTargetDescriptorSize = 0;
@@ -81,9 +84,14 @@ private:
 	ID3D12CommandAllocator*		directQueueAlloc = nullptr;
 	ID3D12GraphicsCommandList3*	directList = nullptr;
 
+	ID3D12CommandQueue*			computeQueue = nullptr;
+	ID3D12CommandAllocator*		computeQueueAlloc = nullptr;
+	ID3D12GraphicsCommandList3* computeList = nullptr;
+
 	ID3DBlob*					vertexShader = nullptr;
 	ID3DBlob*					geometryShader = nullptr;
 	ID3DBlob*					pixelShader	 = nullptr;
+	ID3DBlob*					computeShader = nullptr;
 
 	ID3D12DescriptorHeap*		resourceHeap = nullptr;
 	unsigned int				resourceHeapSize = 0;
@@ -91,6 +99,10 @@ private:
 	ID3D12Fence1* fence = nullptr;
 	HANDLE eventHandle = nullptr;
 	UINT64 fenceValue = 0;
+
+	ID3D12Fence1* fence2 = nullptr;
+	HANDLE eventHandle2 = nullptr;
+	UINT64 fenceValue2 = 0;
 
 	void CreateHWND(HINSTANCE hInstance, LONG width, LONG height);
 	void CreateDevice();
@@ -111,7 +123,9 @@ private:
 
 
 
-	void waitForGPU();
+	void waitForDirectQueue();
+
+	void waitForComputeQueue();
 
 	void SetResourceTransitionBarrier(ID3D12GraphicsCommandList * commandList, ID3D12Resource * resource, D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter);
 };
