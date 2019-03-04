@@ -52,6 +52,7 @@ private:
 		ID3D12Resource1*			vertexBufferResource = nullptr;
 		D3D12_VERTEX_BUFFER_VIEW	vertexBufferView = {};
 
+
 		float pointSize[2] = {};
 		int pointWidth, pointHeight;
 		unsigned int numberOfObjects = 0;
@@ -72,9 +73,6 @@ private:
 	ID3D12DescriptorHeap*		renderTargetsHeap = nullptr;
 	ID3D12Resource1*			renderTargets[NUM_SWAP_BUFFERS] = {};
 	UINT						renderTargetDescriptorSize = 0;
-
-	//ID3D12Resource1*			vertexBufferResource[3] = {};
-	//D3D12_VERTEX_BUFFER_VIEW	vertexBufferView[3] = {};
 
 	ID3D12CommandQueue*			directQueue	= nullptr;
 	ID3D12CommandAllocator*		directQueueAlloc = nullptr;

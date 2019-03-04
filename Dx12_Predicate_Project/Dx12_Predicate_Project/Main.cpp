@@ -2,6 +2,7 @@
 
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLine, int nCmdShow)
 {
+	// Initiate console window
 	AllocConsole();
 	_wfreopen(L"CONOUT$", L"w", stdout);
 

@@ -382,7 +382,8 @@ void Renderer::CreateRootSignature()
 
 void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 {
-	
+	ID3D12Resource* uploadBuffer;
+
 
 	D3D12_HEAP_PROPERTIES hp = {};
 	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -397,6 +398,7 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	rd.MipLevels = 1;
 	rd.SampleDesc.Count = 1;
 	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+	rd.Format = DXGI_FORMAT_UNKNOWN;
 
 	if (FAILED(device->CreateCommittedResource(
 		&hp,
@@ -404,16 +406,10 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 		&rd,
 		D3D12_RESOURCE_STATE_GENERIC_READ,
 		nullptr,
-		IID_PPV_ARGS(&state->vertexBufferResource))))
+		IID_PPV_ARGS(&uploadBuffer))))
 	{
-		throw "Could not create Vertex Buffer";
+		throw "Could not create Upload Vertex Buffer";
 	}
-
-	// Initialise vertex buffer view
-	state->vertexBufferView.BufferLocation = state->vertexBufferResource->GetGPUVirtualAddress();
-	state->vertexBufferView.StrideInBytes = sizeof(Vertex);
-	state->vertexBufferView.SizeInBytes = state->pointWidth * state->pointHeight * sizeof(Vertex);
-
 
 	float wFloat = state->pointWidth, hFloat = state->pointHeight;
 	double widthIncrement = (float)2.0f / ((float)wFloat);
@@ -434,16 +430,67 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 		widthPos += widthIncrement;
 	}
 
-
-
 	void* dataBegin = nullptr;
 	D3D12_RANGE range = { 0,0 };
 
-	state->vertexBufferResource->Map(0, &range, &dataBegin);
+	uploadBuffer->Map(0, &range, &dataBegin);
 	memcpy(dataBegin, pointArr, state->pointWidth * state->pointHeight * sizeof(Vertex));
-	state->vertexBufferResource->Unmap(0, nullptr);
+	uploadBuffer->Unmap(0, nullptr);
+
+
+	// Create DEFAULT buffer
+	hp = {};
+	hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+	hp.CreationNodeMask = 1;
+	hp.VisibleNodeMask = 1;
+
+	rd = {};
+	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	rd.Width = state->pointWidth * state->pointHeight * sizeof(Vertex);
+	rd.Height = 1;
+	rd.DepthOrArraySize = 1;
+	rd.MipLevels = 1;
+	rd.SampleDesc.Count = 1;
+	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	if (FAILED(device->CreateCommittedResource(
+		&hp,
+		D3D12_HEAP_FLAG_NONE,
+		&rd,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(&state->vertexBufferResource))))
+	{
+		throw "Could not create Default Vertex Buffer";
+	}
+
+	waitForGPU();
+
+	directList->Reset(directQueueAlloc, nullptr);
+
+	// Copy from upload buffer to default buffer
+	directList->CopyBufferRegion(state->vertexBufferResource, 0, uploadBuffer, 0, state->pointWidth * state->pointHeight * sizeof(Vertex));
+
+	SetResourceTransitionBarrier(
+		directList,
+		state->vertexBufferResource,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+	// Initialise vertex buffer view
+	state->vertexBufferView.BufferLocation = state->vertexBufferResource->GetGPUVirtualAddress();
+	state->vertexBufferView.StrideInBytes = sizeof(Vertex);
+	state->vertexBufferView.SizeInBytes = state->pointWidth * state->pointHeight * sizeof(Vertex);
+
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+
+	waitForGPU();
 
 	delete[]pointArr;
+	SafeRelease(&uploadBuffer);
 }
 
 void Renderer::Present()
