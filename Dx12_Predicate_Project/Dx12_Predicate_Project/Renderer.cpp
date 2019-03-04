@@ -62,6 +62,8 @@ void Renderer::Run()
 		{
 			this->waitForGPU();
 
+			//UpdatePredicateData(states[0], 0, 8, 0);
+
 			renderTest(states[0]);
 		}
 	}
@@ -154,6 +156,7 @@ void Renderer::CreateCMDInterface()
 		directQueueAlloc,
 		nullptr,
 		IID_PPV_ARGS(&directList));
+
 
 	//Command lists are created in the recording state. Since there is nothing to
 	//record right now and the main loop expects it to be closed, we close it.
@@ -384,7 +387,6 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 {
 	ID3D12Resource* uploadBuffer;
 
-
 	D3D12_HEAP_PROPERTIES hp = {};
 	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
 	hp.CreationNodeMask = 1;
@@ -465,7 +467,6 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	}
 
 	waitForGPU();
-
 	directList->Reset(directQueueAlloc, nullptr);
 
 	// Copy from upload buffer to default buffer
@@ -493,6 +494,88 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	SafeRelease(&uploadBuffer);
 }
 
+void Renderer::CreatePredicateBuffer(TestState * state)
+{
+	UINT64 memSize = state->pointWidth * state->pointHeight * 8;
+
+	D3D12_HEAP_PROPERTIES hp = {};
+	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+	hp.CreationNodeMask = 1;
+	hp.VisibleNodeMask = 1;
+
+	D3D12_RESOURCE_DESC rd = {};
+	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	rd.Width = memSize;
+	rd.Height = 1;
+	rd.DepthOrArraySize = 1;
+	rd.MipLevels = 1;
+	rd.SampleDesc.Count = 1;
+	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	if (FAILED(device->CreateCommittedResource(
+		&hp,
+		D3D12_HEAP_FLAG_NONE,
+		&rd,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&state->predicateUploadResource))))
+	{
+		throw "Could not create Upload Buffer for Predicate";
+	}
+
+
+	hp = {};
+	hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+	hp.CreationNodeMask = 1;
+	hp.VisibleNodeMask = 1;
+
+	rd = {};
+	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	rd.Width = memSize;
+	rd.Height = 1;
+	rd.DepthOrArraySize = 1;
+	rd.MipLevels = 1;
+	rd.SampleDesc.Count = 1;
+	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	if (FAILED(device->CreateCommittedResource(
+		&hp,
+		D3D12_HEAP_FLAG_NONE,
+		&rd,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(&state->predicateResource))))
+	{
+		throw "Could not create Predicate Buffer";
+	}
+
+	waitForGPU();
+
+	void* dataBegin = nullptr;
+	D3D12_RANGE range = { 0,0 };
+
+	state->predicateUploadResource->Map(0, &range, &dataBegin);
+	memset(dataBegin, (char)0, memSize);
+	memset(dataBegin, (char)1, memSize/2.f);
+	state->predicateUploadResource->Unmap(0, nullptr);
+
+	waitForGPU();
+	directList->Reset(directQueueAlloc, nullptr);
+
+	directList->CopyBufferRegion(state->predicateResource, 0, state->predicateUploadResource, 0, memSize);
+
+	SetResourceTransitionBarrier(
+		directList,
+		state->predicateResource,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+}
+
 void Renderer::Present()
 {
 	DXGI_PRESENT_PARAMETERS pp = {};
@@ -511,6 +594,7 @@ Renderer::TestState* Renderer::CreateTestState(int width, int height)
 	newState->pointSize[1] = (float)1.f / height;
 
 	CreateVertexBufferAndVertexData(newState);
+	CreatePredicateBuffer(newState);
 
 	return newState;
 }
@@ -558,6 +642,7 @@ void Renderer::renderTest(TestState* state)
 
 	for (int i = 0; i < state->numberOfObjects; i++)
 	{
+		directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
 		directList->DrawInstanced(1, 1, i, 0);
 	}
 	SetResourceTransitionBarrier(directList,
@@ -569,7 +654,7 @@ void Renderer::renderTest(TestState* state)
 
 	ID3D12CommandList* listsToExecute[] = { directList };
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-
+	
 	Present();
 }
 

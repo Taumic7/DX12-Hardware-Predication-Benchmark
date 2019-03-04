@@ -52,6 +52,9 @@ private:
 		ID3D12Resource1*			vertexBufferResource = nullptr;
 		D3D12_VERTEX_BUFFER_VIEW	vertexBufferView = {};
 
+		ID3D12Resource*				predicateUploadResource = nullptr;
+		ID3D12Resource*				predicateResource = nullptr;
+
 
 		float pointSize[2] = {};
 		int pointWidth, pointHeight;
@@ -76,8 +79,7 @@ private:
 
 	ID3D12CommandQueue*			directQueue	= nullptr;
 	ID3D12CommandAllocator*		directQueueAlloc = nullptr;
-	ID3D12GraphicsCommandList3*			directList = nullptr;
-
+	ID3D12GraphicsCommandList3*	directList = nullptr;
 
 	ID3DBlob*					vertexShader = nullptr;
 	ID3DBlob*					geometryShader = nullptr;
@@ -101,6 +103,7 @@ private:
 	void CreatePSO();
 	void CreateRootSignature();
 	void CreateVertexBufferAndVertexData(TestState* state);
+	void CreatePredicateBuffer(TestState* state);
 	void Present();
 
 	TestState* CreateTestState(int width, int height);
@@ -111,5 +114,4 @@ private:
 	void waitForGPU();
 
 	void SetResourceTransitionBarrier(ID3D12GraphicsCommandList * commandList, ID3D12Resource * resource, D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter);
-
 };
