@@ -753,7 +753,7 @@ void Renderer::CreateLogicBuffer()
 		&hp,
 		D3D12_HEAP_FLAG_NONE,
 		&rd,
-		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_COMMON,
 		nullptr,
 		IID_PPV_ARGS(&logicBufferResource))))
 	{
@@ -770,21 +770,21 @@ void Renderer::CreateLogicBuffer()
 	memcpy(dataBegin, &data, memSize);
 	logicUploadResource->Unmap(0, nullptr);
 
-	waitForDirectQueue();
-	directList->Reset(directQueueAlloc, nullptr);
+	copyList->Reset(copyQueueAlloc, nullptr);
 
-	directList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);
+	//copyList->CopyResource(logicBufferResource, logicUploadResource);						// TO COPY ALL
+	copyList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);	// TO COPT PART
 
-	SetResourceTransitionBarrier(
-		directList,
+	/*SetResourceTransitionBarrier(
+		copyList,
 		logicBufferResource,
-		D3D12_RESOURCE_STATE_COPY_DEST,
-		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+		D3D12_RESOURCE_STATE_COMMON,
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);*/
 
-	directList->Close();
+	copyList->Close();
 
-	ID3D12CommandList* listsToExecute[] = { directList };
-	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+	ID3D12CommandList* listsToExecute[] = { copyList };
+	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 }
 
 void Renderer::Present()
