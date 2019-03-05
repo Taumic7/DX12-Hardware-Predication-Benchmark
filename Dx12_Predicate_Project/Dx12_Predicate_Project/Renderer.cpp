@@ -28,6 +28,7 @@ Renderer::Renderer(HINSTANCE hInstance, int width, int height)
 		CreateShaders();
 		CreateRootSignature();
 		CreatePSO();
+		CreateLogicBuffer();
 
 		const int set = 10;
 		const float ratio = (float)height / width;
@@ -62,9 +63,8 @@ void Renderer::Run()
 		{
 			this->waitForDirectQueue();
 			this->waitForComputeQueue();
-			//UpdatePredicateData(states[0], 0, 8, 0);
 
-			renderTest(states[0]);
+			renderTest(states[2]);
 		}
 	}
 }
@@ -176,6 +176,24 @@ void Renderer::CreateCMDInterface()
 		IID_PPV_ARGS(&computeList));
 
 	computeList->Close();
+
+	//--------------------------------------------------------------------
+
+	D3D12_COMMAND_QUEUE_DESC cqd3 = {};
+	cqd3.Type = D3D12_COMMAND_LIST_TYPE_COPY;
+	device->CreateCommandQueue(&cqd3, IID_PPV_ARGS(&copyQueue));
+
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyQueueAlloc));
+
+	device->CreateCommandList(
+		0,
+		D3D12_COMMAND_LIST_TYPE_COPY,
+		copyQueueAlloc,
+		nullptr,
+		IID_PPV_ARGS(&copyList));
+
+	copyList->Close();
+
 }
 
 void Renderer::CreateSwapChain()
@@ -226,15 +244,25 @@ void Renderer::CreateSwapChain()
 
 void Renderer::CreateFence()
 {
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence));
-	fenceValue = 1;
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&directFence));
+	directFenceValue = 1;
 	//Create an event handle to use for GPU synchronization.
-	eventHandle = CreateEvent(0, false, false, 0);
+	directEventHandle = CreateEvent(0, false, false, 0);
 
-	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence2));
-	fenceValue2 = 1;
+	//-----------------------------------------------------------------------------
+
+
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&computeFence));
+	computeFenceValue = 1;
 	//Create an event handle to use for GPU synchronization.
-	eventHandle2 = CreateEvent(0, false, false, 0);
+	computeEventHandle = CreateEvent(0, false, false, 0);
+
+	//-----------------------------------------------------------------------------
+
+	device->CreateFence(0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(&copyFence));
+	copyFenceValue = 1;
+	//Create an event handle to use for GPU synchronization.
+	copyEventHandle = CreateEvent(0, false, false, 0);
 }
 
 void Renderer::CreateRenderTargets()
@@ -443,14 +471,20 @@ void Renderer::CreateRootSignature()
 		throw "Could not create direct queue root signature";
 	}
 
-	//----------------------------
+	//----------------------------------------------------------------
 
 	// Predicate buffer UAV
-	D3D12_ROOT_PARAMETER  rootParam2[1];
+	D3D12_ROOT_PARAMETER  rootParam2[2];
 	rootParam2[0].ParameterType = D3D12_ROOT_PARAMETER_TYPE_UAV;
 	rootParam2[0].Descriptor.ShaderRegister = 0;
 	rootParam2[0].Descriptor.RegisterSpace = 0;
 	rootParam2[0].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+
+	// compute shader cbv, filled by copy queue
+	rootParam2[1].ParameterType = D3D12_ROOT_PARAMETER_TYPE_CBV;
+	rootParam2[1].Descriptor.ShaderRegister = 0;
+	rootParam2[1].Descriptor.RegisterSpace = 0;
+	rootParam2[1].ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
 	D3D12_ROOT_SIGNATURE_DESC rsDesc2;
 	rsDesc2.NumParameters = ARRAYSIZE(rootParam2);
@@ -648,8 +682,8 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	D3D12_RANGE range = { 0,0 };
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
-	memset(dataBegin, (char)0, memSize);
-	memset(dataBegin, (char)1, memSize/2.f);
+	memset(dataBegin, (char)1, memSize);
+	//memset(dataBegin, (char)1, memSize/2.f);
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
@@ -660,6 +694,90 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	SetResourceTransitionBarrier(
 		directList,
 		state->predicateResource,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
+
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+}
+
+void Renderer::CreateLogicBuffer()
+{
+	const UINT64 memSize = sizeof(int);
+
+	D3D12_HEAP_PROPERTIES hp = {};
+	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
+	hp.CPUPageProperty = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
+	hp.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
+	hp.CreationNodeMask = 1;
+	hp.VisibleNodeMask = 1;
+
+	D3D12_RESOURCE_DESC rd = {};
+	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	rd.Width = memSize;
+	rd.Height = 1;
+	rd.DepthOrArraySize = 1;
+	rd.MipLevels = 1;
+	rd.SampleDesc.Count = 1;
+	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	if (FAILED(device->CreateCommittedResource(
+		&hp,
+		D3D12_HEAP_FLAG_NONE,
+		&rd,
+		D3D12_RESOURCE_STATE_GENERIC_READ,
+		nullptr,
+		IID_PPV_ARGS(&logicUploadResource))))
+	{
+		throw "Could not create Upload Buffer for Predicate";
+	}
+
+
+	hp = {};
+	hp.Type = D3D12_HEAP_TYPE_DEFAULT;
+	hp.CreationNodeMask = 1;
+	hp.VisibleNodeMask = 1;
+
+	rd = {};
+	rd.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
+	rd.Width = memSize;
+	rd.Height = 1;
+	rd.DepthOrArraySize = 1;
+	rd.MipLevels = 1;
+	rd.SampleDesc.Count = 1;
+	rd.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+	if (FAILED(device->CreateCommittedResource(
+		&hp,
+		D3D12_HEAP_FLAG_NONE,
+		&rd,
+		D3D12_RESOURCE_STATE_COPY_DEST,
+		nullptr,
+		IID_PPV_ARGS(&logicBufferResource))))
+	{
+		throw "Could not create Predicate Buffer";
+	}
+
+	waitForCopyQueue();
+
+	void* dataBegin = nullptr;
+	D3D12_RANGE range = { 0,0 };
+
+	logicUploadResource->Map(0, &range, &dataBegin);
+	int data = 12;
+	memcpy(dataBegin, &data, memSize);
+	logicUploadResource->Unmap(0, nullptr);
+
+	waitForDirectQueue();
+	directList->Reset(directQueueAlloc, nullptr);
+
+	directList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);
+
+	SetResourceTransitionBarrier(
+		directList,
+		logicBufferResource,
 		D3D12_RESOURCE_STATE_COPY_DEST,
 		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);
 
@@ -723,6 +841,7 @@ void Renderer::renderTest(TestState* state)
 	//}
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
 	computeList->SetComputeRootUnorderedAccessView(0, state->predicateResource->GetGPUVirtualAddress());
+	computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
 
 	//-----------------------------------------------
 
@@ -777,15 +896,15 @@ void Renderer::waitForDirectQueue()
 //for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
-	const UINT64 fenceL = fenceValue;
-	directQueue->Signal(fence, fenceL);
-	fenceValue++;
+	const UINT64 fenceL = directFenceValue;
+	directQueue->Signal(directFence, fenceL);
+	directFenceValue++;
 
 	//Wait until command queue is done.
-	if (fence->GetCompletedValue() < fenceL)
+	if (directFence->GetCompletedValue() < fenceL)
 	{
-		fence->SetEventOnCompletion(fenceL, eventHandle);
-		WaitForSingleObject(eventHandle, INFINITE);
+		directFence->SetEventOnCompletion(fenceL, directEventHandle);
+		WaitForSingleObject(directEventHandle, INFINITE);
 	}
 }
 
@@ -796,15 +915,34 @@ void Renderer::waitForComputeQueue()
 //for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
-	const UINT64 fenceL = fenceValue;
-	computeQueue->Signal(fence2, fenceL);
-	fenceValue2++;
+	const UINT64 fenceL = directFenceValue;
+	computeQueue->Signal(computeFence, fenceL);
+	computeFenceValue++;
 
 	//Wait until command queue is done.
-	if (fence2->GetCompletedValue() < fenceL)
+	if (computeFence->GetCompletedValue() < fenceL)
 	{
-		fence2->SetEventOnCompletion(fenceL, eventHandle2);
-		WaitForSingleObject(eventHandle2, INFINITE);
+		computeFence->SetEventOnCompletion(fenceL, computeEventHandle);
+		WaitForSingleObject(computeEventHandle, INFINITE);
+	}
+}
+
+void Renderer::waitForCopyQueue()
+{
+	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
+//This is code implemented as such for simplicity. The cpu could for example be used
+//for other tasks to prepare the next frame while the current one is being rendered.
+
+//Signal and increment the fence value.
+	const UINT64 fenceL = copyFenceValue;
+	copyQueue->Signal(copyFence, fenceL);
+	copyFenceValue++;
+
+	//Wait until command queue is done.
+	if (copyFence->GetCompletedValue() < fenceL)
+	{
+		copyFence->SetEventOnCompletion(fenceL, copyEventHandle);
+		WaitForSingleObject(copyEventHandle, INFINITE);
 	}
 }
 

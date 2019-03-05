@@ -88,6 +88,13 @@ private:
 	ID3D12CommandAllocator*		computeQueueAlloc = nullptr;
 	ID3D12GraphicsCommandList3* computeList = nullptr;
 
+	ID3D12CommandQueue*			copyQueue = nullptr;
+	ID3D12CommandAllocator*		copyQueueAlloc = nullptr;
+	ID3D12GraphicsCommandList3* copyList = nullptr;
+
+	ID3D12Resource1*			logicBufferResource = nullptr;
+	ID3D12Resource1*			logicUploadResource = nullptr;
+
 	ID3DBlob*					vertexShader = nullptr;
 	ID3DBlob*					geometryShader = nullptr;
 	ID3DBlob*					pixelShader	 = nullptr;
@@ -96,13 +103,17 @@ private:
 	ID3D12DescriptorHeap*		resourceHeap = nullptr;
 	unsigned int				resourceHeapSize = 0;
 
-	ID3D12Fence1* fence = nullptr;
-	HANDLE eventHandle = nullptr;
-	UINT64 fenceValue = 0;
+	ID3D12Fence1* directFence = nullptr;
+	HANDLE directEventHandle = nullptr;
+	UINT64 directFenceValue = 0;
 
-	ID3D12Fence1* fence2 = nullptr;
-	HANDLE eventHandle2 = nullptr;
-	UINT64 fenceValue2 = 0;
+	ID3D12Fence1* computeFence = nullptr;
+	HANDLE computeEventHandle = nullptr;
+	UINT64 computeFenceValue = 0;
+
+	ID3D12Fence1* copyFence = nullptr;
+	HANDLE copyEventHandle = nullptr;
+	UINT64 copyFenceValue = 0;
 
 	void CreateHWND(HINSTANCE hInstance, LONG width, LONG height);
 	void CreateDevice();
@@ -116,6 +127,7 @@ private:
 	void CreateRootSignature();
 	void CreateVertexBufferAndVertexData(TestState* state);
 	void CreatePredicateBuffer(TestState* state);
+	void CreateLogicBuffer();
 	void Present();
 
 	TestState* CreateTestState(int width, int height);
@@ -126,6 +138,8 @@ private:
 	void waitForDirectQueue();
 
 	void waitForComputeQueue();
+
+	void waitForCopyQueue();
 
 	void SetResourceTransitionBarrier(ID3D12GraphicsCommandList * commandList, ID3D12Resource * resource, D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter);
 };
