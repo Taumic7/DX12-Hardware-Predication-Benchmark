@@ -4,10 +4,14 @@
 #include <d3dcompiler.h>
 #include <Windows.h>
 #include <iostream>
+#include <chrono>
 
 #pragma comment (lib, "d3d12.lib")
 #pragma comment (lib, "DXGI.lib")
 #pragma comment (lib, "d3dcompiler.lib")
+
+using namespace std::chrono_literals;
+constexpr std::chrono::nanoseconds timestep(200ms);
 
 template<class Interface>
 inline void SafeRelease(
@@ -24,6 +28,8 @@ inline void SafeRelease(
 const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
 static bool gUsePredicate;
 
+//#define CLOCK_NOW std::chrono::high_resolution_clock::now()
+
 
 struct LogicBuffer
 {
@@ -32,10 +38,19 @@ struct LogicBuffer
 	int height;
 };
 
+enum DIRECTION
+{
+	UP,
+	DOWN,
+	LEFT,
+	RIGHT
+};
+
 static int gCurrentState;
 static bool gStateIsChanged;
 static bool gLogicIsUpdated;
 static LogicBuffer gLogicBuffer;
+static DIRECTION gDirection;
 
 class Renderer
 {
@@ -46,10 +61,12 @@ public:
 	void Run();
 
 private:
-
+	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};
 	int pointWidth[3], pointHeight[3];
 	unsigned int numberOfObjects[3] = { 0 };
+	std::chrono::time_point<std::chrono::high_resolution_clock> last_moved;
+	std::chrono::time_point<std::chrono::high_resolution_clock> time_start;
 
 	float clearColor[4] = { 0.2f,0.2f,0.2f,1.0f };
 	UINT currentRenderTarget = 0;
@@ -142,6 +159,8 @@ private:
 	void CreatePredicateBuffer(TestState* state);
 	void CreateLogicBuffer();
 	void Present();
+
+	void Move();
 
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);

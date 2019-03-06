@@ -29,20 +29,24 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			gUsePredicate = !gUsePredicate;
 			break;
 		case VK_RIGHT: case 0x44:
-			gLogicBuffer.x++;
-			gLogicIsUpdated = true;
+			gDirection = DIRECTION::RIGHT;
+			/*gLogicBuffer.x++;
+			gLogicIsUpdated = true;*/
 			break;
 		case VK_DOWN: case 0x53:
-			gLogicBuffer.y--;
-			gLogicIsUpdated = true;
+			gDirection = DIRECTION::DOWN;
+			/*gLogicBuffer.y--;
+			gLogicIsUpdated = true;*/
 			break;
 		case VK_LEFT: case 0x41:
-			gLogicBuffer.x--;
-			gLogicIsUpdated = true;
+			gDirection = DIRECTION::LEFT;
+			/*gLogicBuffer.x--;
+			gLogicIsUpdated = true;*/
 			break;
 		case VK_UP: case 0x57:
-			gLogicBuffer.y++;
-			gLogicIsUpdated = true;
+			gDirection = DIRECTION::UP;
+			/*gLogicBuffer.y++;
+			gLogicIsUpdated = true;*/
 			break;
 		}
 		break;
@@ -55,12 +59,16 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 Renderer::Renderer(HINSTANCE hInstance, int width, int height)
 {
+	//std::chrono::nanoseconds lag(0ns);
+
 	gUsePredicate = true;
 
 	gLogicIsUpdated = true;
 	gStateIsChanged = true;
 
 	gCurrentState = 0;
+	gDirection = DIRECTION::UP;
+	last_moved = clock.now();
 
 	try
 	{
@@ -96,8 +104,8 @@ Renderer::~Renderer()
 
 void Renderer::Run()
 {
-	MSG msg = { 0 };
 
+	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
 		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
@@ -107,6 +115,12 @@ void Renderer::Run()
 		}
 		else
 		{
+			// If "timestep" time has passed since we last moved, move again
+			if (std::chrono::duration_cast<std::chrono::nanoseconds>(clock.now() - last_moved) > timestep)
+			{
+				Move();
+				
+			}
 			this->waitForDirectQueue();
 			this->waitForComputeQueue();
 
@@ -118,7 +132,7 @@ void Renderer::Run()
 			{
 				UpdateLogicBuffer();
 			}
-
+			UpdateLogicBuffer();
 			renderTest(states[gCurrentState]);
 		}
 	}
@@ -162,10 +176,14 @@ void Renderer::CreateDevice()
 	IDXGIFactory6*	factory = nullptr;
 	IDXGIAdapter1*	adapter = nullptr;
 	ID3D12Debug* debugController;
+
+#ifdef _DEBUG
 	if (SUCCEEDED(D3D12GetDebugInterface(IID_PPV_ARGS(&debugController))))
 	{
 		debugController->EnableDebugLayer();
 	}
+#endif
+
 	CreateDXGIFactory(IID_PPV_ARGS(&factory));
 	for (UINT adapterIndex = 0;; ++adapterIndex)
 	{
@@ -845,6 +863,39 @@ void Renderer::Present()
 	currentRenderTarget = ++currentRenderTarget % NUM_SWAP_BUFFERS;
 }
 
+void Renderer::Move()
+{
+	switch (gDirection)
+	{
+	case UP:
+		if (gLogicBuffer.y < states[gCurrentState]->pointHeight - 1)
+		{
+			gLogicBuffer.y++;
+		}
+		break;
+	case DOWN:
+		if (gLogicBuffer.y > 0)
+		{
+			gLogicBuffer.y--;
+		}
+		break;
+	case LEFT:
+		if (gLogicBuffer.x > 0)
+		{
+			gLogicBuffer.x--;
+		}
+		break;
+	case RIGHT:
+		if (gLogicBuffer.x < states[gCurrentState]->pointWidth - 1)
+		{
+			gLogicBuffer.x++;
+		}
+		break;
+	}
+	gLogicIsUpdated = true;
+	last_moved = clock.now();
+}
+
 Renderer::TestState* Renderer::CreateTestState(int width, int height)
 {
 	TestState* newState = new TestState;
@@ -953,13 +1004,13 @@ void Renderer::UpdateLogicBuffer()
 
 	waitForCopyQueue();
 
+	copyQueueAlloc->Reset();
 	copyList->Reset(copyQueueAlloc, nullptr);
 	copyList->CopyResource(logicBufferResource, logicUploadResource);
 	copyList->Close();
 
 	ID3D12CommandList* listsToExecute[] = { copyList };
 	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-
 	gLogicIsUpdated = false;
 }
 
