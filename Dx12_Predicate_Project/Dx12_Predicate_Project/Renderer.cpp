@@ -1,11 +1,50 @@
 #include "Renderer.h"
 
+
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	switch (message)
 	{
 	case WM_DESTROY:
 		PostQuitMessage(0);
+		break;
+	case WM_KEYDOWN:
+		switch (wParam)
+		{
+		case VK_F1:
+			gCurrentState = 0;
+			gStateIsChanged = true;
+			break;
+		case VK_F2:
+			gCurrentState = 1;
+			gStateIsChanged = true;
+			break;
+		case VK_F3:
+			gCurrentState = 2;
+			gStateIsChanged = true;
+			break;
+
+		case VK_SPACE:
+			gUsePredicate = !gUsePredicate;
+			break;
+		case VK_RIGHT: case 0x44:
+			gLogicBuffer.x++;
+			gLogicIsUpdated = true;
+			break;
+		case VK_DOWN: case 0x53:
+			gLogicBuffer.y--;
+			gLogicIsUpdated = true;
+			break;
+		case VK_LEFT: case 0x41:
+			gLogicBuffer.x--;
+			gLogicIsUpdated = true;
+			break;
+		case VK_UP: case 0x57:
+			gLogicBuffer.y++;
+			gLogicIsUpdated = true;
+			break;
+		}
 		break;
 	}
 
@@ -16,6 +55,13 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 Renderer::Renderer(HINSTANCE hInstance, int width, int height)
 {
+	gUsePredicate = true;
+
+	gLogicIsUpdated = true;
+	gStateIsChanged = true;
+
+	gCurrentState = 0;
+
 	try
 	{
 		CreateHWND(hInstance, width, height);
@@ -64,7 +110,16 @@ void Renderer::Run()
 			this->waitForDirectQueue();
 			this->waitForComputeQueue();
 
-			renderTest(states[2]);
+			if (gStateIsChanged)
+			{
+				UpdateGlobalLogicBuffer();
+			}
+			if (gLogicIsUpdated)
+			{
+				UpdateLogicBuffer();
+			}
+
+			renderTest(states[gCurrentState]);
 		}
 	}
 }
@@ -705,7 +760,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 
 void Renderer::CreateLogicBuffer()
 {
-	const UINT64 memSize = sizeof(int);
+	const UINT64 memSize = sizeof(LogicBuffer);
 
 	D3D12_HEAP_PROPERTIES hp = {};
 	hp.Type = D3D12_HEAP_TYPE_UPLOAD;
@@ -760,31 +815,27 @@ void Renderer::CreateLogicBuffer()
 		throw "Could not create Predicate Buffer";
 	}
 
-	waitForCopyQueue();
+	//waitForCopyQueue();
 
-	void* dataBegin = nullptr;
-	D3D12_RANGE range = { 0,0 };
+	//void* dataBegin = nullptr;
+	//D3D12_RANGE range = { 0,0 };
 
-	logicUploadResource->Map(0, &range, &dataBegin);
-	int data = 12;
-	memcpy(dataBegin, &data, memSize);
-	logicUploadResource->Unmap(0, nullptr);
+	//logicUploadResource->Map(0, &range, &dataBegin);
+	//int data[] = { 5,6 };
+	//memcpy(dataBegin, &data, memSize);
+	//logicUploadResource->Unmap(0, nullptr);
 
-	copyList->Reset(copyQueueAlloc, nullptr);
+	//copyList->Reset(copyQueueAlloc, nullptr);
 
 	//copyList->CopyResource(logicBufferResource, logicUploadResource);						// TO COPY ALL
-	copyList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);	// TO COPT PART
+	////copyList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);	// TO COPT PART
 
-	/*SetResourceTransitionBarrier(
-		copyList,
-		logicBufferResource,
-		D3D12_RESOURCE_STATE_COMMON,
-		D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);*/
+	//// MAYBE TODO: Transition
 
-	copyList->Close();
+	//copyList->Close();
 
-	ID3D12CommandList* listsToExecute[] = { copyList };
-	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+	//ID3D12CommandList* listsToExecute[] = { copyList };
+	//this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 }
 
 void Renderer::Present()
@@ -807,6 +858,10 @@ Renderer::TestState* Renderer::CreateTestState(int width, int height)
 	CreateVertexBufferAndVertexData(newState);
 	CreatePredicateBuffer(newState);
 
+	newState->logicBuffer.height = height;
+	newState->logicBuffer.x = width / 2.f - 1;
+	newState->logicBuffer.y = height / 2.f - 1;
+
 	return newState;
 }
 
@@ -823,22 +878,6 @@ void Renderer::renderTest(TestState* state)
 	directList->SetGraphicsRootSignature(rootSignature);
 	computeList->SetComputeRootSignature(this->computeRootSignature);
 
-	//if (decrease)
-	//{
-	//	pointSize[1] -= 0.0001f;
-	//	if (pointSize[1] <= 0.f)
-	//	{
-	//		decrease = false;
-	//	}
-	//}
-	//else
-	//{
-	//	pointSize[1] += 0.0001f;
-	//	if (pointSize[1] >= 0.3f)
-	//	{
-	//		decrease = true;
-	//	}
-	//}
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
 	computeList->SetComputeRootUnorderedAccessView(0, state->predicateResource->GetGPUVirtualAddress());
 	computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
@@ -867,11 +906,23 @@ void Renderer::renderTest(TestState* state)
 	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
 	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
 
-	for (int i = 0; i < state->numberOfObjects; i++)
+	if (gUsePredicate)
 	{
-		directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
-		directList->DrawInstanced(1, 1, i, 0);
+		for (int i = 0; i < state->numberOfObjects; i++)
+		{
+			directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			directList->DrawInstanced(1, 1, i, 0);
+		}
 	}
+	else
+	{
+		for (int i = 0; i < state->numberOfObjects; i++)
+		{
+			directList->DrawInstanced(1, 1, i, 0);
+		}
+	}
+
+
 	SetResourceTransitionBarrier(directList,
 		renderTargets[currentRenderTarget],
 		D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
@@ -887,6 +938,37 @@ void Renderer::renderTest(TestState* state)
 	this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
 	
 	Present();
+}
+
+void Renderer::UpdateLogicBuffer()
+{
+	states[gCurrentState]->logicBuffer = gLogicBuffer;
+
+	void* dataBegin = nullptr;
+	D3D12_RANGE range = { 0,0 };
+
+	logicUploadResource->Map(0, &range, &dataBegin);
+	memcpy(dataBegin, &states[gCurrentState]->logicBuffer, sizeof(LogicBuffer));
+	logicUploadResource->Unmap(0, nullptr);
+
+	waitForCopyQueue();
+
+	copyList->Reset(copyQueueAlloc, nullptr);
+	copyList->CopyResource(logicBufferResource, logicUploadResource);
+	copyList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { copyList };
+	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+
+	gLogicIsUpdated = false;
+}
+
+void Renderer::UpdateGlobalLogicBuffer()
+{
+	gLogicBuffer = states[gCurrentState]->logicBuffer;
+	gStateIsChanged = false;
+
+	UpdateLogicBuffer();
 }
 
 void Renderer::waitForDirectQueue()

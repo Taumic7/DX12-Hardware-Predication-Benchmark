@@ -28,7 +28,9 @@ RWStructuredBuffer<Predicate> PredicateBuffer : register(u0);
 
 cbuffer CB : register(b0)
 {
-	int index;
+	int indexX;
+	int indexY;
+	int height;
 }
 
 [numthreads(threadBlockSize, 1, 1)]
@@ -37,6 +39,6 @@ void CS_main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 	uint tid = (groupId.x * threadBlockSize) + groupIndex;
 	if (tid == 0)
 	{
-		PredicateBuffer[index].predVal = 0;
+		PredicateBuffer[indexX * height + indexY].predVal = 0;
 	}
 }

@@ -22,6 +22,20 @@ inline void SafeRelease(
 }
 
 const unsigned int NUM_SWAP_BUFFERS = 2; //Number of buffers
+static bool gUsePredicate;
+
+
+struct LogicBuffer
+{
+	int x;
+	int y;
+	int height;
+};
+
+static int gCurrentState;
+static bool gStateIsChanged;
+static bool gLogicIsUpdated;
+static LogicBuffer gLogicBuffer;
 
 class Renderer
 {
@@ -32,8 +46,6 @@ public:
 	void Run();
 
 private:
-
-	bool decrease = true;
 
 	float pointSize[3][2] = {};
 	int pointWidth[3], pointHeight[3];
@@ -55,6 +67,7 @@ private:
 		ID3D12Resource*				predicateUploadResource = nullptr;
 		ID3D12Resource*				predicateResource = nullptr;
 
+		LogicBuffer logicBuffer;
 
 		float pointSize[2] = {};
 		int pointWidth, pointHeight;
@@ -133,12 +146,11 @@ private:
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);
 
-
+	void UpdateLogicBuffer();
+	void UpdateGlobalLogicBuffer();
 
 	void waitForDirectQueue();
-
 	void waitForComputeQueue();
-
 	void waitForCopyQueue();
 
 	void SetResourceTransitionBarrier(ID3D12GraphicsCommandList * commandList, ID3D12Resource * resource, D3D12_RESOURCE_STATES StateBefore, D3D12_RESOURCE_STATES StateAfter);
