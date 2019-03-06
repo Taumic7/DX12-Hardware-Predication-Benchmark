@@ -6,6 +6,10 @@
 #include <iostream>
 #include <chrono>
 
+//#include <thread>
+//#include <mutex>
+//#include <condition_variable>
+
 #pragma comment (lib, "d3d12.lib")
 #pragma comment (lib, "DXGI.lib")
 #pragma comment (lib, "d3dcompiler.lib")
@@ -30,6 +34,12 @@ static bool gUsePredicate;
 
 //#define CLOCK_NOW std::chrono::high_resolution_clock::now()
 
+struct WindowInputParams
+{
+	HINSTANCE hInstance;
+	int width;
+	int height;
+};
 
 struct LogicBuffer
 {
@@ -46,21 +56,25 @@ enum DIRECTION
 	RIGHT
 };
 
-static int gCurrentState;
-static bool gStateIsChanged;
-static bool gLogicIsUpdated;
-static LogicBuffer gLogicBuffer;
-static DIRECTION gDirection;
+//static int gCurrentState;
+//static bool gStateIsChanged;
+//static bool gLogicIsUpdated;
+//static LogicBuffer gLogicBuffer;
+//static DIRECTION gDirection;
 
 class Renderer
 {
 public:
-	Renderer(HINSTANCE hInstance, int width, int height);
+	Renderer();
 	~Renderer();
 
+	void Init(HINSTANCE hInstance, int width, int height);
 	void Run();
 
+	void HandleInput();
+
 private:
+
 	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};
 	int pointWidth[3], pointHeight[3];
@@ -90,6 +104,12 @@ private:
 		int pointWidth, pointHeight;
 		unsigned int numberOfObjects = 0;
 	};
+
+	bool quit = false;
+	int currentState;
+	//bool stateIsChanged;
+	//bool logicIsUpdated;
+	DIRECTION currentDirection;
 
 
 	TestState* states[3] = {};
@@ -166,7 +186,6 @@ private:
 	void renderTest(TestState* state);
 
 	void UpdateLogicBuffer();
-	void UpdateGlobalLogicBuffer();
 
 	void waitForDirectQueue();
 	void waitForComputeQueue();

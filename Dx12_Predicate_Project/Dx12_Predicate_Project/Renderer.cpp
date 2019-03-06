@@ -16,17 +16,20 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 
 
 
-Renderer::Renderer(HINSTANCE hInstance, int width, int height)
+Renderer::Renderer()
 {
-	//std::chrono::nanoseconds lag(0ns);
+};
 
+Renderer::~Renderer()
+{
+}
+
+void Renderer::Init(HINSTANCE hInstance, int width, int height)
+{
 	gUsePredicate = true;
 
-	gLogicIsUpdated = true;
-	gStateIsChanged = true;
-
-	gCurrentState = 0;
-	gDirection = DIRECTION::UP;
+	currentState = 0;
+	currentDirection = DIRECTION::UP;
 	last_moved = clock.now();
 
 	try
@@ -48,22 +51,17 @@ Renderer::Renderer(HINSTANCE hInstance, int width, int height)
 
 		for (int i = 0; i < 3; i++)
 		{
-			states[i] = CreateTestState(set * (i+1), set * ratio * (i+1));
+			states[i] = CreateTestState(set * (i + 1), set * ratio * (i + 1));
 		}
 	}
 	catch (const char* e)
 	{
 		std::cout << e << std::endl;
 	}
-};
-
-Renderer::~Renderer()
-{
 }
 
 void Renderer::Run()
 {
-
 	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
@@ -78,60 +76,54 @@ void Renderer::Run()
 				switch (msg.wParam)
 				{
 				case VK_F1:
-					gCurrentState = 0;
-					gStateIsChanged = true;
+					currentState = 0;
 					break;
 				case VK_F2:
-					gCurrentState = 1;
-					gStateIsChanged = true;
+					currentState = 1;
 					break;
 				case VK_F3:
-					gCurrentState = 2;
-					gStateIsChanged = true;
+					currentState = 2;
 					break;
 
 				case VK_SPACE:
 					gUsePredicate = !gUsePredicate;
 					break;
 				case VK_RIGHT: case 0x44:
-					gDirection = DIRECTION::RIGHT;
+					currentDirection = DIRECTION::RIGHT;
 					break;
 				case VK_DOWN: case 0x53:
-					gDirection = DIRECTION::DOWN;
+					currentDirection = DIRECTION::DOWN;
 					break;
 				case VK_LEFT: case 0x41:
-					gDirection = DIRECTION::LEFT;
+					currentDirection = DIRECTION::LEFT;
 					break;
 				case VK_UP: case 0x57:
-					gDirection = DIRECTION::UP;
+					currentDirection = DIRECTION::UP;
 					break;
 				}
 				break;
 			}
-
 		}
-		else
+
+		// If "timestep" time has passed since we last moved, move again
+		if (std::chrono::duration_cast<std::chrono::nanoseconds>(clock.now() - last_moved) > timestep)
 		{
-			// If "timestep" time has passed since we last moved, move again
-			if (std::chrono::duration_cast<std::chrono::nanoseconds>(clock.now() - last_moved) > timestep)
-			{
-				Move();
+			Move();
 				
-			}
-			this->waitForDirectQueue();
-			this->waitForComputeQueue();
-
-			if (gStateIsChanged)
-			{
-				UpdateGlobalLogicBuffer();
-			}
-			if (gLogicIsUpdated)
-			{
-				UpdateLogicBuffer();
-			}
-			UpdateLogicBuffer();
-			renderTest(states[gCurrentState]);
 		}
+		this->waitForDirectQueue();
+		this->waitForComputeQueue();
+
+		//if (gStateIsChanged)
+		//{
+		//	UpdateGlobalLogicBuffer();
+		//}
+		//if (gLogicIsUpdated)
+		//{
+		//	UpdateLogicBuffer();
+		//}
+		UpdateLogicBuffer();
+		renderTest(states[currentState]);
 	}
 }
 
@@ -166,6 +158,8 @@ void Renderer::CreateHWND(HINSTANCE hInstance, LONG width, LONG height)
 		nullptr);
 
 	ShowWindow(window, SW_SHOWDEFAULT);
+
+	//cvWindow.notify_all();
 }
 
 void Renderer::CreateDevice()
@@ -862,34 +856,35 @@ void Renderer::Present()
 
 void Renderer::Move()
 {
-	switch (gDirection)
+	switch (currentDirection)
 	{
 	case UP:
-		if (gLogicBuffer.y < states[gCurrentState]->pointHeight - 1)
+		if (states[currentState]->logicBuffer.y < states[currentState]->pointHeight - 1)
 		{
-			gLogicBuffer.y++;
+			states[currentState]->logicBuffer.y++;
 		}
 		break;
 	case DOWN:
-		if (gLogicBuffer.y > 0)
+		if (states[currentState]->logicBuffer.y > 0)
 		{
-			gLogicBuffer.y--;
+			states[currentState]->logicBuffer.y--;
 		}
 		break;
 	case LEFT:
-		if (gLogicBuffer.x > 0)
+		if (states[currentState]->logicBuffer.x > 0)
 		{
-			gLogicBuffer.x--;
+			states[currentState]->logicBuffer.x--;
 		}
 		break;
 	case RIGHT:
-		if (gLogicBuffer.x < states[gCurrentState]->pointWidth - 1)
+		if (states[currentState]->logicBuffer.x < states[currentState]->pointWidth - 1)
 		{
-			gLogicBuffer.x++;
+			states[currentState]->logicBuffer.x++;
 		}
 		break;
 	}
-	gLogicIsUpdated = true;
+	//gLogicIsUpdated = true;
+	UpdateLogicBuffer();
 	last_moved = clock.now();
 }
 
@@ -990,13 +985,13 @@ void Renderer::renderTest(TestState* state)
 
 void Renderer::UpdateLogicBuffer()
 {
-	states[gCurrentState]->logicBuffer = gLogicBuffer;
+	//states[gCurrentState]->logicBuffer = gLogicBuffer;
 
 	void* dataBegin = nullptr;
 	D3D12_RANGE range = { 0,0 };
 
 	logicUploadResource->Map(0, &range, &dataBegin);
-	memcpy(dataBegin, &states[gCurrentState]->logicBuffer, sizeof(LogicBuffer));
+	memcpy(dataBegin, &states[currentState]->logicBuffer, sizeof(LogicBuffer));
 	logicUploadResource->Unmap(0, nullptr);
 
 	waitForCopyQueue();
@@ -1008,15 +1003,6 @@ void Renderer::UpdateLogicBuffer()
 
 	ID3D12CommandList* listsToExecute[] = { copyList };
 	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-	gLogicIsUpdated = false;
-}
-
-void Renderer::UpdateGlobalLogicBuffer()
-{
-	gLogicBuffer = states[gCurrentState]->logicBuffer;
-	gStateIsChanged = false;
-
-	UpdateLogicBuffer();
 }
 
 void Renderer::waitForDirectQueue()
@@ -1073,6 +1059,58 @@ void Renderer::waitForCopyQueue()
 	{
 		copyFence->SetEventOnCompletion(fenceL, copyEventHandle);
 		WaitForSingleObject(copyEventHandle, INFINITE);
+	}
+}
+
+void Renderer::HandleInput()
+{
+	MSG msg = { 0 };
+	while (WM_QUIT != msg.message)
+	{
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
+		{
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+
+			switch (msg.message)
+			{
+			case WM_DESTROY:
+				quit = true;
+				PostQuitMessage(0);
+				break;
+
+			case WM_KEYDOWN:
+				switch (msg.wParam)
+				{
+				case VK_F1:
+					currentState = 0;
+					break;
+				case VK_F2:
+					currentState = 1;
+					break;
+				case VK_F3:
+					currentState = 2;
+					break;
+
+				case VK_SPACE:
+					gUsePredicate = !gUsePredicate;
+					break;
+				case VK_RIGHT: case 0x44:
+					currentDirection = DIRECTION::RIGHT;
+					break;
+				case VK_DOWN: case 0x53:
+					currentDirection = DIRECTION::DOWN;
+					break;
+				case VK_LEFT: case 0x41:
+					currentDirection = DIRECTION::LEFT;
+					break;
+				case VK_UP: case 0x57:
+					currentDirection = DIRECTION::UP;
+					break;
+				}
+				break;
+			}
+		}
 	}
 }
 
