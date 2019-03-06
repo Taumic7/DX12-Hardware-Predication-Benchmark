@@ -9,47 +9,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	case WM_DESTROY:
 		PostQuitMessage(0);
 		break;
-	case WM_KEYDOWN:
-		switch (wParam)
-		{
-		case VK_F1:
-			gCurrentState = 0;
-			gStateIsChanged = true;
-			break;
-		case VK_F2:
-			gCurrentState = 1;
-			gStateIsChanged = true;
-			break;
-		case VK_F3:
-			gCurrentState = 2;
-			gStateIsChanged = true;
-			break;
-
-		case VK_SPACE:
-			gUsePredicate = !gUsePredicate;
-			break;
-		case VK_RIGHT: case 0x44:
-			gDirection = DIRECTION::RIGHT;
-			/*gLogicBuffer.x++;
-			gLogicIsUpdated = true;*/
-			break;
-		case VK_DOWN: case 0x53:
-			gDirection = DIRECTION::DOWN;
-			/*gLogicBuffer.y--;
-			gLogicIsUpdated = true;*/
-			break;
-		case VK_LEFT: case 0x41:
-			gDirection = DIRECTION::LEFT;
-			/*gLogicBuffer.x--;
-			gLogicIsUpdated = true;*/
-			break;
-		case VK_UP: case 0x57:
-			gDirection = DIRECTION::UP;
-			/*gLogicBuffer.y++;
-			gLogicIsUpdated = true;*/
-			break;
-		}
-		break;
 	}
 
 	return DefWindowProc(hWnd, message, wParam, lParam);
@@ -112,6 +71,44 @@ void Renderer::Run()
 		{
 			TranslateMessage(&msg);
 			DispatchMessage(&msg);
+
+			switch (msg.message)
+			{
+			case WM_KEYDOWN:
+				switch (msg.wParam)
+				{
+				case VK_F1:
+					gCurrentState = 0;
+					gStateIsChanged = true;
+					break;
+				case VK_F2:
+					gCurrentState = 1;
+					gStateIsChanged = true;
+					break;
+				case VK_F3:
+					gCurrentState = 2;
+					gStateIsChanged = true;
+					break;
+
+				case VK_SPACE:
+					gUsePredicate = !gUsePredicate;
+					break;
+				case VK_RIGHT: case 0x44:
+					gDirection = DIRECTION::RIGHT;
+					break;
+				case VK_DOWN: case 0x53:
+					gDirection = DIRECTION::DOWN;
+					break;
+				case VK_LEFT: case 0x41:
+					gDirection = DIRECTION::LEFT;
+					break;
+				case VK_UP: case 0x57:
+					gDirection = DIRECTION::UP;
+					break;
+				}
+				break;
+			}
+
 		}
 		else
 		{
