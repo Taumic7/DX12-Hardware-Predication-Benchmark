@@ -26,15 +26,21 @@ Renderer::~Renderer()
 
 void Renderer::Init(HINSTANCE hInstance, int width, int height)
 {
+	// Launch thread to create window
+	WindowThreadParams* paramTest = new WindowThreadParams(hInstance, 1200, 800, this);
+	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticWindowTheadStart, (LPVOID)paramTest, 0, NULL);
 	gUsePredicate = true;
 
 	currentState = 0;
 	currentDirection = DIRECTION::UP;
 	last_moved = clock.now();
-
+	while (!windowCreated)
+	{
+		// lock thread until window thread is done creating the window
+	}
 	try
 	{
-		CreateHWND(hInstance, width, height);
+		//CreateHWND(hInstance, width, height); // Should be handled by thread
 		CreateDevice();
 		CreateCMDInterface();
 		CreateSwapChain();
@@ -1062,8 +1068,18 @@ void Renderer::waitForCopyQueue()
 	}
 }
 
-void Renderer::HandleInput()
+DWORD Renderer::HandleInput(LPVOID lpParam)
 {
+	// Retrieve the parameter struct
+	WindowThreadParams* threadParams = (WindowThreadParams*)lpParam;
+	try {
+		this->CreateHWND(threadParams->hInstance, threadParams->width, threadParams->height);
+	}
+	catch (const char* e)
+	{
+		std::cout << e << std::endl;
+	}
+	this->windowCreated = true;
 	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
@@ -1112,6 +1128,8 @@ void Renderer::HandleInput()
 			}
 		}
 	}
+	delete threadParams;
+	return 0;
 }
 
 void Renderer::SetResourceTransitionBarrier(ID3D12GraphicsCommandList* commandList, ID3D12Resource* resource,

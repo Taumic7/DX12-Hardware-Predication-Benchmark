@@ -2,9 +2,10 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 #include <d3dcompiler.h>
-#include <Windows.h>
+#include <windows.h>
 #include <iostream>
 #include <chrono>
+#include <thread>
 
 //#include <thread>
 //#include <mutex>
@@ -34,12 +35,13 @@ static bool gUsePredicate;
 
 //#define CLOCK_NOW std::chrono::high_resolution_clock::now()
 
-struct WindowInputParams
-{
-	HINSTANCE hInstance;
-	int width;
-	int height;
-};
+//struct WindowInputParams
+//{
+//	HINSTANCE hInstance;
+//	int width;
+//	int height;
+//};
+
 
 struct LogicBuffer
 {
@@ -64,6 +66,27 @@ enum DIRECTION
 
 class Renderer
 {
+	struct WindowThreadParams
+	{
+		HINSTANCE hInstance;
+		int width;
+		int height;
+		Renderer* instanceP;
+		WindowThreadParams(HINSTANCE hInstance, int w, int h, Renderer* instanceP)
+		{
+			this->hInstance = hInstance;
+			this->width = w;
+			this->height = h;
+			this->instanceP = instanceP;
+		}
+	};
+
+	static DWORD WINAPI StaticWindowTheadStart(void* Param)
+	{
+		WindowThreadParams* params = (WindowThreadParams*)Param;
+		return params->instanceP->HandleInput(params);
+	}
+
 public:
 	Renderer();
 	~Renderer();
@@ -71,9 +94,12 @@ public:
 	void Init(HINSTANCE hInstance, int width, int height);
 	void Run();
 
-	void HandleInput();
+	DWORD HandleInput(LPVOID threadParams);
 
 private:
+	// Temporary solution?
+	bool windowCreated = false;
+
 
 	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};
