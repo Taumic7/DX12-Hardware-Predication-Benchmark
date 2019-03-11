@@ -35,16 +35,12 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	currentState = 0;
 	currentDirection = DIRECTION::UP;
 	last_moved = clock.now();
-	while (!windowCreated)
-	{
-		// lock thread until window thread is done creating the window
-	}
 	try
 	{
 		//CreateHWND(hInstance, width, height); // Should be handled by thread
 		CreateDevice();
 		CreateCMDInterface();
-		CreateSwapChain();
+		CreateSwapChain(); // Has lock to wait for window thread to finish
 		CreateFence();
 		CreateRenderTargets();
 		CreateViewportAndScissorRect(width, height);
@@ -81,18 +77,6 @@ void Renderer::Run()
 			Move();
 				
 		}
-
-		//this->waitForComputeQueue();
-
-		//if (gStateIsChanged)
-		//{
-		//	UpdateGlobalLogicBuffer();
-		//}
-		//if (gLogicIsUpdated)
-		//{
-		//	UpdateLogicBuffer();
-		//}
-		//UpdateLogicBuffer();
 		renderTest(states[currentState]);
 	}
 }
@@ -251,6 +235,12 @@ void Renderer::CreateSwapChain()
 	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 
 	IDXGISwapChain1* swapChain1 = nullptr;
+
+	while (!this->windowCreated)
+	{
+		// Wait for window thread to be done.
+	}
+
 	if (FAILED(factory->CreateSwapChainForHwnd(
 		directQueue,
 		window,
@@ -447,18 +437,6 @@ void Renderer::CreatePSO()
 	{
 		throw "Could not create Graphics PSO";
 	}
-
-	//--------------------------------------------------------
-	//// Retrieve the cached PSO blob
-	//ID3DBlob* cachedBlob;
-	//if (FAILED(this->computePSO->GetCachedBlob(&cachedBlob)))
-	//{
-	//	throw "Failed to get cached computePSO blob";
-	//}
-
-	//D3D12_CACHED_PIPELINE_STATE cachedPSO = {};
-	//cachedPSO.pCachedBlob = reinterpret_cast<void*>(cachedBlob->GetBufferPointer());
-	//cachedPSO.CachedBlobSizeInBytes = cachedBlob->GetBufferSize();
 
 	D3D12_COMPUTE_PIPELINE_STATE_DESC cPsd = {};
 	cPsd.pRootSignature = this->computeRootSignature;
@@ -793,28 +771,6 @@ void Renderer::CreateLogicBuffer()
 	{
 		throw "Could not create Predicate Buffer";
 	}
-
-	//waitForCopyQueue();
-
-	//void* dataBegin = nullptr;
-	//D3D12_RANGE range = { 0,0 };
-
-	//logicUploadResource->Map(0, &range, &dataBegin);
-	//int data[] = { 5,6 };
-	//memcpy(dataBegin, &data, memSize);
-	//logicUploadResource->Unmap(0, nullptr);
-
-	//copyList->Reset(copyQueueAlloc, nullptr);
-
-	//copyList->CopyResource(logicBufferResource, logicUploadResource);						// TO COPY ALL
-	////copyList->CopyBufferRegion(logicBufferResource, 0, logicUploadResource, 0, memSize);	// TO COPT PART
-
-	//// MAYBE TODO: Transition
-
-	//copyList->Close();
-
-	//ID3D12CommandList* listsToExecute[] = { copyList };
-	//this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 }
 
 void Renderer::Present()
@@ -884,7 +840,6 @@ void Renderer::renderTest(TestState* state)
 	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
 	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
 
-
 	this->waitForDirectQueue();
 	directQueueAlloc->Reset();
 	directList->Reset(directQueueAlloc, this->PSO);
@@ -933,9 +888,6 @@ void Renderer::renderTest(TestState* state)
 
 	ID3D12CommandList* listsToExecute[] = { directList };
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-
-	//ID3D12CommandList* listsToExecute2[] = { computeList };
-	//this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
 	
 	Present();
 }
