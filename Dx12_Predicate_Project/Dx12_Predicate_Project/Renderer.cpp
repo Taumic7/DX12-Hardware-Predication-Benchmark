@@ -67,6 +67,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	}
 	// Start copy queue logic thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
+	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
 }
 
 void Renderer::Run()
@@ -80,8 +81,8 @@ void Renderer::Run()
 			Move();
 				
 		}
-		this->waitForDirectQueue();
-		this->waitForComputeQueue();
+
+		//this->waitForComputeQueue();
 
 		//if (gStateIsChanged)
 		//{
@@ -880,27 +881,17 @@ Renderer::TestState* Renderer::CreateTestState(int width, int height)
 void Renderer::renderTest(TestState* state)
 {
 
+	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
+	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
+
+
+	this->waitForDirectQueue();
 	directQueueAlloc->Reset();
 	directList->Reset(directQueueAlloc, this->PSO);
 
-	computeQueueAlloc->Reset();
-	computeList->Reset(computeQueueAlloc, this->computePSO);
-
-
 	directList->SetGraphicsRootSignature(rootSignature);
-	computeList->SetComputeRootSignature(this->computeRootSignature);
 
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
-	computeList->SetComputeRootUnorderedAccessView(0, state->predicateResource->GetGPUVirtualAddress());
-	computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
-
-	//-----------------------------------------------
-
-	computeList->Dispatch(1, 1, 1);
-
-	//-----------------------------------------------
-
-
 
 	directList->RSSetViewports(1, &viewport);
 	directList->RSSetScissorRects(1, &scissorRect);
@@ -913,8 +904,7 @@ void Renderer::renderTest(TestState* state)
 		D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
 	);
 
-	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
-	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
+
 	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
 	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
 
@@ -934,44 +924,20 @@ void Renderer::renderTest(TestState* state)
 		}
 	}
 
-
 	SetResourceTransitionBarrier(directList,
 		renderTargets[currentRenderTarget],
 		D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
 		D3D12_RESOURCE_STATE_PRESENT		//state after
 	);
 	directList->Close();
-	computeList->Close();
 
 	ID3D12CommandList* listsToExecute[] = { directList };
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 
-	ID3D12CommandList* listsToExecute2[] = { computeList };
-	this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
+	//ID3D12CommandList* listsToExecute2[] = { computeList };
+	//this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
 	
 	Present();
-}
-
-void Renderer::UpdateLogicBuffer()
-{
-	//states[gCurrentState]->logicBuffer = gLogicBuffer;
-
-	void* dataBegin = nullptr;
-	D3D12_RANGE range = { 0,0 };
-
-	logicUploadResource->Map(0, &range, &dataBegin);
-	memcpy(dataBegin, &states[currentState]->logicBuffer, sizeof(LogicBuffer));
-	logicUploadResource->Unmap(0, nullptr);
-
-	waitForCopyQueue();
-
-	copyQueueAlloc->Reset();
-	copyList->Reset(copyQueueAlloc, nullptr);
-	copyList->CopyResource(logicBufferResource, logicUploadResource);
-	copyList->Close();
-
-	ID3D12CommandList* listsToExecute[] = { copyList };
-	this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 }
 
 void Renderer::waitForDirectQueue()
@@ -1000,7 +966,7 @@ void Renderer::waitForComputeQueue()
 //for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
-	const UINT64 fenceL = directFenceValue;
+	const UINT64 fenceL = computeFenceValue;
 	computeQueue->Signal(computeFence, fenceL);
 	computeFenceValue++;
 
@@ -1125,6 +1091,29 @@ DWORD Renderer::CopyLogicThread()
 	}
 
 
+	return 0;
+}
+
+DWORD Renderer::ComputeThread()
+{
+	while (true)
+	{
+		this->waitForComputeQueue();
+		computeQueueAlloc->Reset();
+		computeList->Reset(computeQueueAlloc, this->computePSO);
+		computeList->SetComputeRootSignature(this->computeRootSignature);
+		computeList->SetComputeRootUnorderedAccessView(0, states[currentState]->predicateResource->GetGPUVirtualAddress());
+		computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
+		//-----------------------------------------------
+
+		computeList->Dispatch(1, 1, 1);
+
+		//-----------------------------------------------
+		computeList->Close();
+		ID3D12CommandList* listsToExecute2[] = { computeList };
+		this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
+
+	}
 	return 0;
 }
 

@@ -93,6 +93,12 @@ class Renderer
 		return instanceP->CopyLogicThread();
 	}
 
+	static DWORD WINAPI StaticComputeThreadStart(void* Param)
+	{
+		Renderer* instanceP = (Renderer*)Param;
+		return instanceP->ComputeThread();
+	}
+
 public:
 	Renderer();
 	~Renderer();
@@ -102,6 +108,7 @@ public:
 
 	DWORD HandleInputThread(LPVOID threadParams);
 	DWORD CopyLogicThread();
+	DWORD ComputeThread();
 
 private:
 	// Temporary solution?
@@ -218,7 +225,7 @@ private:
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);
 
-	void UpdateLogicBuffer();
+	// void UpdateLogicBuffer();
 
 	void waitForDirectQueue();
 	void waitForComputeQueue();
