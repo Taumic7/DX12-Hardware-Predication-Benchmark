@@ -114,6 +114,8 @@ private:
 	// Temporary solution?
 	bool windowCreated = false;
 
+	bool newData = false;
+
 
 	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};

@@ -39,6 +39,6 @@ void CS_main(uint3 groupId : SV_GroupID, uint groupIndex : SV_GroupIndex)
 	uint tid = (groupId.x * threadBlockSize) + groupIndex;
 	if (tid == 0)
 	{
-		PredicateBuffer[indexX * height + indexY].predVal = 0;
+		PredicateBuffer[indexX * height + indexY].predVal = 1;
 	}
 }

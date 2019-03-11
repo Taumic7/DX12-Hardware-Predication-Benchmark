@@ -49,7 +49,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 		CreatePSO();
 		CreateLogicBuffer();
 
-		const int set = 10;
+		const int set = 20;
 		const float ratio = (float)height / width;
 
 		for (int i = 0; i < 3; i++)
@@ -609,8 +609,8 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	directList->Reset(directQueueAlloc, nullptr);
 
 	// Copy from upload buffer to default buffer
-	directList->CopyBufferRegion(state->vertexBufferResource, 0, uploadBuffer, 0, state->pointWidth * state->pointHeight * sizeof(Vertex));
-
+	//directList->CopyBufferRegion(state->vertexBufferResource, 0, uploadBuffer, 0, state->pointWidth * state->pointHeight * sizeof(Vertex));
+	directList->CopyResource(state->vertexBufferResource, uploadBuffer);
 	SetResourceTransitionBarrier(
 		directList,
 		state->vertexBufferResource,
@@ -694,7 +694,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	D3D12_RANGE range = { 0,0 };
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
-	memset(dataBegin, (char)1, memSize);
+	memset(dataBegin, (char)0, memSize);
 	//memset(dataBegin, (char)1, memSize/2.f);
 	state->predicateUploadResource->Unmap(0, nullptr);
 
@@ -865,9 +865,10 @@ void Renderer::renderTest(TestState* state)
 
 	if (gUsePredicate)
 	{
+		directList->SetPredication(state->predicateResource, 0, D3D12_PREDICATION_OP_EQUAL_ZERO);
 		for (int i = 0; i < state->numberOfObjects; i++)
 		{
-			directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			//directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
 			directList->DrawInstanced(1, 1, i, 0);
 		}
 	}
@@ -961,6 +962,7 @@ DWORD Renderer::HandleInputThread(LPVOID lpParam)
 	{
 		std::cout << e << std::endl;
 	}
+	// Set variable so main thread can create swapchain
 	this->windowCreated = true;
 
 	MSG msg = { 0 };
@@ -1018,9 +1020,11 @@ DWORD Renderer::HandleInputThread(LPVOID lpParam)
 DWORD Renderer::CopyLogicThread()
 {
 	LogicBuffer lastUpdate = {};
+	LogicBuffer oldState = {};
 	while (true)
 	{
-		if ((lastUpdate.x != states[currentState]->logicBuffer.x) || lastUpdate.y != states[currentState]->logicBuffer.y)
+		oldState = states[currentState]->logicBuffer;
+		if ((lastUpdate.x != oldState.x) || lastUpdate.y != oldState.y)
 		{
 			void* dataBegin = nullptr;
 			D3D12_RANGE range = { 0,0 };
@@ -1038,7 +1042,8 @@ DWORD Renderer::CopyLogicThread()
 
 			ID3D12CommandList* listsToExecute[] = { copyList };
 			this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-			lastUpdate = states[currentState]->logicBuffer;
+			lastUpdate = oldState;
+			newData = true;
 		}
 	}
 
@@ -1050,20 +1055,25 @@ DWORD Renderer::ComputeThread()
 {
 	while (true)
 	{
-		this->waitForComputeQueue();
-		computeQueueAlloc->Reset();
-		computeList->Reset(computeQueueAlloc, this->computePSO);
-		computeList->SetComputeRootSignature(this->computeRootSignature);
-		computeList->SetComputeRootUnorderedAccessView(0, states[currentState]->predicateResource->GetGPUVirtualAddress());
-		computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
-		//-----------------------------------------------
+		if (newData)
+		{
+			this->waitForComputeQueue();
+			computeQueueAlloc->Reset();
+			computeList->Reset(computeQueueAlloc, this->computePSO);
+			computeList->SetComputeRootSignature(this->computeRootSignature);
+			computeList->SetComputeRootUnorderedAccessView(0, states[currentState]->predicateResource->GetGPUVirtualAddress());
+			computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
+			//-----------------------------------------------
 
-		computeList->Dispatch(1, 1, 1);
+			computeList->Dispatch(1, 1, 1);
 
-		//-----------------------------------------------
-		computeList->Close();
-		ID3D12CommandList* listsToExecute2[] = { computeList };
-		this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
+			//-----------------------------------------------
+			computeList->Close();
+			ID3D12CommandList* listsToExecute2[] = { computeList };
+			this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
+			newData = false;
+		}
+		
 
 	}
 	return 0;
