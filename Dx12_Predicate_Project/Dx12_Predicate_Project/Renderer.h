@@ -84,7 +84,13 @@ class Renderer
 	static DWORD WINAPI StaticWindowTheadStart(void* Param)
 	{
 		WindowThreadParams* params = (WindowThreadParams*)Param;
-		return params->instanceP->HandleInput(params);
+		return params->instanceP->HandleInputThread(params);
+	}
+
+	static DWORD WINAPI StaticLogicThreadStart(void* Param)
+	{
+		Renderer* instanceP = (Renderer*)Param;
+		return instanceP->CopyLogicThread();
 	}
 
 public:
@@ -94,7 +100,8 @@ public:
 	void Init(HINSTANCE hInstance, int width, int height);
 	void Run();
 
-	DWORD HandleInput(LPVOID threadParams);
+	DWORD HandleInputThread(LPVOID threadParams);
+	DWORD CopyLogicThread();
 
 private:
 	// Temporary solution?

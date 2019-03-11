@@ -28,6 +28,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 {
 	// Launch thread to create window
 	WindowThreadParams* paramTest = new WindowThreadParams(hInstance, 1200, 800, this);
+	// Start window + input thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticWindowTheadStart, (LPVOID)paramTest, 0, NULL);
 	gUsePredicate = true;
 
@@ -64,6 +65,8 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	{
 		std::cout << e << std::endl;
 	}
+	// Start copy queue logic thread
+	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
 }
 
 void Renderer::Run()
@@ -71,46 +74,6 @@ void Renderer::Run()
 	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE))
-		{
-			TranslateMessage(&msg);
-			DispatchMessage(&msg);
-
-			switch (msg.message)
-			{
-			case WM_KEYDOWN:
-				switch (msg.wParam)
-				{
-				case VK_F1:
-					currentState = 0;
-					break;
-				case VK_F2:
-					currentState = 1;
-					break;
-				case VK_F3:
-					currentState = 2;
-					break;
-
-				case VK_SPACE:
-					gUsePredicate = !gUsePredicate;
-					break;
-				case VK_RIGHT: case 0x44:
-					currentDirection = DIRECTION::RIGHT;
-					break;
-				case VK_DOWN: case 0x53:
-					currentDirection = DIRECTION::DOWN;
-					break;
-				case VK_LEFT: case 0x41:
-					currentDirection = DIRECTION::LEFT;
-					break;
-				case VK_UP: case 0x57:
-					currentDirection = DIRECTION::UP;
-					break;
-				}
-				break;
-			}
-		}
-
 		// If "timestep" time has passed since we last moved, move again
 		if (std::chrono::duration_cast<std::chrono::nanoseconds>(clock.now() - last_moved) > timestep)
 		{
@@ -128,7 +91,7 @@ void Renderer::Run()
 		//{
 		//	UpdateLogicBuffer();
 		//}
-		UpdateLogicBuffer();
+		//UpdateLogicBuffer();
 		renderTest(states[currentState]);
 	}
 }
@@ -890,7 +853,7 @@ void Renderer::Move()
 		break;
 	}
 	//gLogicIsUpdated = true;
-	UpdateLogicBuffer();
+	//UpdateLogicBuffer();
 	last_moved = clock.now();
 }
 
@@ -1068,10 +1031,11 @@ void Renderer::waitForCopyQueue()
 	}
 }
 
-DWORD Renderer::HandleInput(LPVOID lpParam)
+DWORD Renderer::HandleInputThread(LPVOID lpParam)
 {
 	// Retrieve the parameter struct
 	WindowThreadParams* threadParams = (WindowThreadParams*)lpParam;
+
 	try {
 		this->CreateHWND(threadParams->hInstance, threadParams->width, threadParams->height);
 	}
@@ -1080,6 +1044,7 @@ DWORD Renderer::HandleInput(LPVOID lpParam)
 		std::cout << e << std::endl;
 	}
 	this->windowCreated = true;
+
 	MSG msg = { 0 };
 	while (WM_QUIT != msg.message)
 	{
@@ -1129,6 +1094,37 @@ DWORD Renderer::HandleInput(LPVOID lpParam)
 		}
 	}
 	delete threadParams;
+	return 0;
+}
+
+DWORD Renderer::CopyLogicThread()
+{
+	LogicBuffer lastUpdate = {};
+	while (true)
+	{
+		if ((lastUpdate.x != states[currentState]->logicBuffer.x) || lastUpdate.y != states[currentState]->logicBuffer.y)
+		{
+			void* dataBegin = nullptr;
+			D3D12_RANGE range = { 0,0 };
+
+			logicUploadResource->Map(0, &range, &dataBegin);
+			memcpy(dataBegin, &states[currentState]->logicBuffer, sizeof(LogicBuffer));
+			logicUploadResource->Unmap(0, nullptr);
+
+			waitForCopyQueue();
+
+			copyQueueAlloc->Reset();
+			copyList->Reset(copyQueueAlloc, nullptr);
+			copyList->CopyResource(logicBufferResource, logicUploadResource);
+			copyList->Close();
+
+			ID3D12CommandList* listsToExecute[] = { copyList };
+			this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+			lastUpdate = states[currentState]->logicBuffer;
+		}
+	}
+
+
 	return 0;
 }
 
