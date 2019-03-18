@@ -39,9 +39,9 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	{
 		//CreateHWND(hInstance, width, height); // Should be handled by thread
 		CreateDevice();
+		CreateFence();
 		CreateCMDInterface();
 		CreateSwapChain(); // Has lock to wait for window thread to finish
-		CreateFence();
 		CreateRenderTargets();
 		CreateViewportAndScissorRect(width, height);
 		CreateShaders();
@@ -165,13 +165,14 @@ void Renderer::CreateCMDInterface()
 	D3D12_COMMAND_QUEUE_DESC cqd = {};
 	device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&directQueue));
 
-	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAlloc));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAllocators[0]));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAllocators[1]));
 
 	// Create Command list
 	device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		directQueueAlloc,
+		directQueueAllocators[0],
 		nullptr,
 		IID_PPV_ARGS(&directList));
 
@@ -211,6 +212,7 @@ void Renderer::CreateCMDInterface()
 		IID_PPV_ARGS(&copyList));
 
 	copyList->Close();
+
 
 }
 
@@ -606,7 +608,7 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	}
 
 	waitForDirectQueue();
-	directList->Reset(directQueueAlloc, nullptr);
+	directList->Reset(directQueueAllocators[0], nullptr);
 
 	// Copy from upload buffer to default buffer
 	//directList->CopyBufferRegion(state->vertexBufferResource, 0, uploadBuffer, 0, state->pointWidth * state->pointHeight * sizeof(Vertex));
@@ -699,7 +701,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
-	directList->Reset(directQueueAlloc, nullptr);
+	directList->Reset(directQueueAllocators[1], nullptr);
 
 	directList->CopyBufferRegion(state->predicateResource, 0, state->predicateUploadResource, 0, memSize);
 
@@ -839,13 +841,11 @@ void Renderer::renderTest(TestState* state)
 
 	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
 	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
-
-	this->waitForDirectQueue();
-	directQueueAlloc->Reset();
-	directList->Reset(directQueueAlloc, this->PSO);
+	ID3D12CommandAllocator* activeAllocator = directQueueAllocators[currentRenderTarget];
+	activeAllocator->Reset();
+	directList->Reset(activeAllocator, this->PSO);
 
 	directList->SetGraphicsRootSignature(rootSignature);
-
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
 
 	directList->RSSetViewports(1, &viewport);
@@ -888,6 +888,7 @@ void Renderer::renderTest(TestState* state)
 	directList->Close();
 
 	ID3D12CommandList* listsToExecute[] = { directList };
+	this->waitForDirectQueue();
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 	
 	Present();

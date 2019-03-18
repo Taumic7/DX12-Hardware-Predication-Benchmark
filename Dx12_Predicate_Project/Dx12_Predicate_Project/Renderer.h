@@ -173,7 +173,7 @@ private:
 	UINT						renderTargetDescriptorSize = 0;
 
 	ID3D12CommandQueue*			directQueue	= nullptr;
-	ID3D12CommandAllocator*		directQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		directQueueAllocators[2];
 	ID3D12GraphicsCommandList3*	directList = nullptr;
 
 	ID3D12CommandQueue*			computeQueue = nullptr;
