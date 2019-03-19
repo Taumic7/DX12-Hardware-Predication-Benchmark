@@ -818,6 +818,28 @@ void Renderer::Move()
 	last_moved = clock.now();
 }
 
+void Renderer::CollectTimestamp(TestState * state, double time)
+{
+	if (state->totalTimeStamps < 100)
+	{
+		state->timeStampSum += time;
+		state->totalTimeStamps++;
+	}
+	else if (state->totalTimeStamps == 100)
+	{
+		state->timeStampSum /= 100;
+		// write to file
+		std::ofstream myfile;
+		std::string filename = std::to_string(state->numberOfObjects) + std::string("timestamps.txt");
+		myfile.open(filename);
+		myfile << std::to_string(state->timeStampSum);
+		myfile.close();
+		std::cout << filename + " created." << std::endl;
+		state->totalTimeStamps++;
+	}
+
+}
+
 Renderer::TestState* Renderer::CreateTestState(int width, int height)
 {
 	TestState* newState = new TestState;
@@ -952,6 +974,8 @@ void Renderer::renderTest(TestState* state)
 
 	std::string title = std::string("GPU time to execute ") + std::to_string(state->numberOfObjects) + std::string(" draw calls: ") + std::to_string(timeInMs) + std::string("ms");
 	SetWindowTextA(this->window, title.c_str());
+
+	this->CollectTimestamp(state, timeInMs);
 }
 
 void Renderer::waitForDirectQueue()

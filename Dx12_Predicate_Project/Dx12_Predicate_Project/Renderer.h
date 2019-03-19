@@ -4,8 +4,10 @@
 #include <d3dcompiler.h>
 #include <windows.h>
 #include <iostream>
+#include <fstream>
 #include <chrono>
 #include <thread>
+#include <vector>
 #include <string>
 #include "D3D12Timer.h"
 
@@ -149,6 +151,7 @@ private:
 		float pointSize[2] = {};
 		int pointWidth, pointHeight;
 		unsigned int numberOfObjects = 0;
+		double timeStampSum = 0, totalTimeStamps = 0;
 	};
 
 	bool quit = false;
@@ -229,6 +232,7 @@ private:
 	void Present();
 
 	void Move();
+	void CollectTimestamp(TestState* state, double time);
 
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);
