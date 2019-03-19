@@ -70,6 +70,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 void Renderer::Run()
 {
 	MSG msg = { 0 };
+	bool testingDone = false;
 	while (WM_QUIT != msg.message)
 	{
 		// If "timestep" time has passed since we last moved, move again
@@ -78,7 +79,18 @@ void Renderer::Run()
 			Move();
 				
 		}
+		if (states[currentState]->totalTimeStamps > 100 && !testingDone)
+		{
+			currentState++;
+		}
+
 		renderTest(states[currentState]);
+
+		if (currentState >= 11 && !testingDone && states[currentState]->totalTimeStamps > 100)
+		{
+			testingDone = true;
+			std::cout << "Automated tests complete." << std::endl;
+		}
 	}
 }
 
@@ -699,7 +711,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
 	memset(dataBegin, (char)0, memSize);
-	//memset(dataBegin, (char)1, memSize/2.f);
+	//memset(dataBegin, (char)1, 8);
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
@@ -830,7 +842,7 @@ void Renderer::CollectTimestamp(TestState * state, double time)
 		state->timeStampSum /= 100;
 		// write to file
 		std::ofstream myfile;
-		std::string filename = std::to_string(state->numberOfObjects) + std::string("timestamps.txt");
+		std::string filename = std::string("Tests/") + std::to_string(state->numberOfObjects) + std::string("automatedTestTest2.txt");
 		myfile.open(filename);
 		myfile << std::to_string(state->timeStampSum);
 		myfile.close();
@@ -888,63 +900,28 @@ void Renderer::renderTest(TestState* state)
 	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
 	// Start timestamp
 	this->gpuTimer.start(directList, 0);
+	const int predDivisor = 1; // 1 = predicate all, 2 = predicate half etc etc
 	if (gUsePredicate)
 	{
-		for (int i = 0; i < state->numberOfObjects; i++)
+		for (int j = 0; j < predDivisor; j++)
 		{
-			directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
-			directList->DrawInstanced(1, 1, i, 0);
-			// Submit a list every 5000 draw calls
-			if ((i + 1) % 5000 == 0)
+			directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			for (int i = j * state->numberOfObjects / predDivisor; i < j + state->numberOfObjects / predDivisor; i++)
 			{
-				directList->Close();
-				ID3D12CommandList* listsToExecute[] = { directList };
-				this->waitForDirectQueue();
-				this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-				// Swap allocators
-				currentAllocatorIndex = ++currentAllocatorIndex % 2;
-				activeAllocator = directQueueAllocators[currentAllocatorIndex];
-
-				activeAllocator->Reset();
-				directList->Reset(activeAllocator, this->PSO);
-				directList->SetGraphicsRootSignature(rootSignature);
-				directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
-				directList->RSSetViewports(1, &viewport);
-				directList->RSSetScissorRects(1, &scissorRect);
-				directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
-				directList->IASetVertexBuffers(0, 1, &state->vertexBufferView);
-				directList->OMSetRenderTargets(1, &cdh, true, nullptr);
+				directList->DrawInstanced(1, 1, i, 0);
+				//directList->DrawInstanced(1, 50000000, 0, 0);
 			}
+
 		}
+		
 	}
 	else
 	{
-
 		for (int i = 0; i < state->numberOfObjects; i++)
 		{
 			directList->DrawInstanced(1, 1, i, 0);
-			// Submit a list every 5000 draw calls
-			if ((i + 1) % 5000 == 0)
-			{
-				directList->Close();
-				ID3D12CommandList* listsToExecute[] = { directList };
-				this->waitForDirectQueue();
-				this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-				// Swap allocators
-				currentAllocatorIndex = ++currentAllocatorIndex % 2;
-				activeAllocator = directQueueAllocators[currentAllocatorIndex];
-
-				activeAllocator->Reset();
-				directList->Reset(activeAllocator, this->PSO);
-				directList->SetGraphicsRootSignature(rootSignature);
-				directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
-				directList->RSSetViewports(1, &viewport);
-				directList->RSSetScissorRects(1, &scissorRect);
-				directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
-				directList->IASetVertexBuffers(0, 1, &state->vertexBufferView);
-				directList->OMSetRenderTargets(1, &cdh, true, nullptr);
-			}
 		}
+		//directList->DrawInstanced(1, 50000000, 0, 0);
 	}
 	this->gpuTimer.stop(directList, 0);
 	this->gpuTimer.resolveQueryToCPU(directList, 0);
@@ -1068,40 +1045,40 @@ DWORD Renderer::HandleInputThread(LPVOID lpParam)
 			case WM_KEYDOWN:
 				switch (msg.wParam)
 				{
-				case VK_F1:
+				case VK_NUMPAD0:
 					currentState = 0;
 					break;
-				case VK_F2:
+				case VK_NUMPAD1:
 					currentState = 1;
 					break;
-				case VK_F3:
+				case VK_NUMPAD2:
 					currentState = 2;
 					break;
-				case VK_F4:
+				case VK_NUMPAD3:
 					currentState = 3;
 					break;
-				case VK_F5:
+				case VK_NUMPAD4:
 					currentState = 4;
 					break;
-				case VK_F6:
+				case VK_NUMPAD5:
 					currentState = 5;
 					break;
-				case VK_F7:
+				case VK_NUMPAD6:
 					currentState = 6;
 					break;
-				case VK_F8:
+				case VK_NUMPAD7:
 					currentState = 7;
 					break;
-				case VK_F9:
+				case VK_NUMPAD8:
 					currentState = 8;
 					break;
-				case VK_F10:
+				case VK_NUMPAD9:
 					currentState = 9;
 					break;
-				case VK_F11:
+				case VK_DIVIDE:
 					currentState = 10;
 					break;
-				case VK_F12:
+				case VK_MULTIPLY:
 					currentState = 11;
 					break;
 				case VK_SPACE:
