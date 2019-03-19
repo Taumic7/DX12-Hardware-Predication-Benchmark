@@ -6,6 +6,8 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <string>
+#include "D3D12Timer.h"
 
 //#include <thread>
 //#include <mutex>
@@ -81,6 +83,8 @@ class Renderer
 		}
 	};
 
+	// Thread functions
+
 	static DWORD WINAPI StaticWindowTheadStart(void* Param)
 	{
 		WindowThreadParams* params = (WindowThreadParams*)Param;
@@ -154,7 +158,7 @@ private:
 	DIRECTION currentDirection;
 
 
-	TestState* states[3] = {};
+	TestState* states[12] = {};
 
 	HWND			window;
 	D3D12_VIEWPORT	viewport = {};
@@ -177,11 +181,11 @@ private:
 	ID3D12GraphicsCommandList3*	directList = nullptr;
 
 	ID3D12CommandQueue*			computeQueue = nullptr;
-	ID3D12CommandAllocator*		computeQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		computeQueueAllocators[2];
 	ID3D12GraphicsCommandList3* computeList = nullptr;
 
 	ID3D12CommandQueue*			copyQueue = nullptr;
-	ID3D12CommandAllocator*		copyQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		copyQueueAllocators[2];
 	ID3D12GraphicsCommandList3* copyList = nullptr;
 
 	ID3D12Resource1*			logicBufferResource = nullptr;
@@ -194,6 +198,8 @@ private:
 
 	ID3D12DescriptorHeap*		resourceHeap = nullptr;
 	unsigned int				resourceHeapSize = 0;
+
+	D3D12::D3D12Timer			gpuTimer;
 
 	ID3D12Fence1* directFence = nullptr;
 	HANDLE directEventHandle = nullptr;

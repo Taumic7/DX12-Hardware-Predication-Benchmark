@@ -156,10 +156,12 @@
     </FxCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="D3D12Timer.cpp" />
     <ClCompile Include="Main.cpp" />
     <ClCompile Include="Renderer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="D3D12Timer.h" />
     <ClInclude Include="Renderer.h" />
   </ItemGroup>
   <ItemGroup>
