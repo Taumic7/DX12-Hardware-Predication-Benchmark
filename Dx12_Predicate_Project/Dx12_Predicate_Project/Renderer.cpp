@@ -64,7 +64,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	gpuTimer.init(this->device, 1);
 	// Start copy queue logic thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
-	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
+	//CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
 }
 
 void Renderer::Run()
@@ -711,7 +711,7 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
 	memset(dataBegin, (char)0, memSize);
-	//memset(dataBegin, (char)1, 8);
+	memset(dataBegin, (char)0, 8);
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
@@ -842,11 +842,15 @@ void Renderer::CollectTimestamp(TestState * state, double time)
 		state->timeStampSum /= 100;
 		// write to file
 		std::ofstream myfile;
-		std::string filename = std::string("Tests/") + std::to_string(state->numberOfObjects) + std::string("automatedTestTest2.txt");
-		myfile.open(filename);
-		myfile << std::to_string(state->timeStampSum);
+		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred.txt");
+		myfile.open(filename, std::ios_base::app);
+		myfile << std::to_string(state->timeStampSum) << std::endl;
+		if (this->currentState == 11)
+		{
+			myfile << std::endl;
+		}
 		myfile.close();
-		std::cout << filename + " created." << std::endl;
+		std::cout << std::to_string(currentState + 1) << std::string(":") <<  filename << " created." << std::endl;
 		state->totalTimeStamps++;
 	}
 
@@ -905,13 +909,15 @@ void Renderer::renderTest(TestState* state)
 	{
 		for (int j = 0; j < predDivisor; j++)
 		{
-			directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
-			for (int i = j * state->numberOfObjects / predDivisor; i < j + state->numberOfObjects / predDivisor; i++)
+			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			for (int i = j * state->numberOfObjects / predDivisor; i < (j + 1) * state->numberOfObjects / predDivisor; i++)
 			{
+				// Predication - Unique draw calls
 				directList->DrawInstanced(1, 1, i, 0);
-				//directList->DrawInstanced(1, 50000000, 0, 0);
 			}
-
+			// Predication - Instanced "large" draw calls
+			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			//directList->DrawInstanced(1, state->numberOfObjects / predDivisor, 0, 0);
 		}
 		
 	}
@@ -923,6 +929,7 @@ void Renderer::renderTest(TestState* state)
 		}
 		//directList->DrawInstanced(1, 50000000, 0, 0);
 	}
+	// Stop timestamp
 	this->gpuTimer.stop(directList, 0);
 	this->gpuTimer.resolveQueryToCPU(directList, 0);
 	SetResourceTransitionBarrier(directList,
