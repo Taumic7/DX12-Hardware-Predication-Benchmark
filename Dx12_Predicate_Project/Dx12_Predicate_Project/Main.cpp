@@ -9,7 +9,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPWSTR lpCmdLi
 	_wfreopen(L"CONOUT$", L"w", stdout);
 	Renderer r;
 
-	r.Init(hInstance, 1200, 800);
+	r.Init(hInstance, 1200, 800, RENDER_TEST);
+	//r.Init(hInstance, 1200, 800, RENDER_TEST);
 	r.Run();
 
 	return 0;

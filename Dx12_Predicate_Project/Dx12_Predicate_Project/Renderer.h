@@ -62,6 +62,8 @@ enum DIRECTION
 	RIGHT
 };
 
+enum RenderUsage { RENDER_GAME, RENDER_TEST };
+
 //static int gCurrentState;
 //static bool gStateIsChanged;
 //static bool gLogicIsUpdated;
@@ -109,7 +111,7 @@ public:
 	Renderer();
 	~Renderer();
 
-	void Init(HINSTANCE hInstance, int width, int height);
+	void Init(HINSTANCE hInstance, int width, int height, RenderUsage usage);
 	void Run();
 
 	DWORD HandleInputThread(LPVOID threadParams);
@@ -117,11 +119,10 @@ public:
 	DWORD ComputeThread();
 
 private:
-	// Temporary solution?
 	bool windowCreated = false;
 
 	bool newData = false;
-
+	RenderUsage renderUsage;
 
 	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};
@@ -236,6 +237,8 @@ private:
 
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);
+
+	void renderGame(TestState* state);
 
 	// void UpdateLogicBuffer();
 

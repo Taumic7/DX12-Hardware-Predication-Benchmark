@@ -24,8 +24,10 @@ Renderer::~Renderer()
 {
 }
 
-void Renderer::Init(HINSTANCE hInstance, int width, int height)
+void Renderer::Init(HINSTANCE hInstance, int width, int height, RenderUsage usage)
 {
+	renderUsage = usage;
+
 	// Launch thread to create window
 	WindowThreadParams* paramTest = new WindowThreadParams(hInstance, 1200, 800, this);
 	// Start window + input thread
@@ -64,7 +66,11 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	gpuTimer.init(this->device, 1);
 	// Start copy queue logic thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
-	//CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
+
+	if (renderUsage == RenderUsage::RENDER_GAME)
+	{
+		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
+	}
 }
 
 void Renderer::Run()
@@ -84,7 +90,14 @@ void Renderer::Run()
 			currentState++;
 		}
 
-		renderTest(states[currentState]);
+		if (renderUsage == RENDER_GAME)
+		{
+			renderGame(states[currentState]);
+		}
+		else
+		{
+			renderTest(states[currentState]);
+		}
 
 		if (currentState >= 11 && !testingDone && states[currentState]->totalTimeStamps > 100)
 		{
@@ -710,8 +723,16 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	D3D12_RANGE range = { 0,0 };
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
-	memset(dataBegin, (char)0, memSize);
-	memset(dataBegin, (char)0, 8);
+	
+	if (renderUsage == RENDER_GAME)
+	{
+		memset(dataBegin, (char)0, memSize);
+	}
+	else
+	{
+		memset(dataBegin, (char)1, memSize);
+		memset(dataBegin, (char)0, 8);
+	}
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
@@ -842,7 +863,7 @@ void Renderer::CollectTimestamp(TestState * state, double time)
 		state->timeStampSum /= 100;
 		// write to file
 		std::ofstream myfile;
-		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred.txt");
+		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred2.boat");
 		myfile.open(filename, std::ios_base::app);
 		myfile << std::to_string(state->timeStampSum) << std::endl;
 		if (this->currentState == 11)
@@ -904,17 +925,19 @@ void Renderer::renderTest(TestState* state)
 	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
 	// Start timestamp
 	this->gpuTimer.start(directList, 0);
-	const int predDivisor = 1; // 1 = predicate all, 2 = predicate half etc etc
+	const int predDivisor = 2; // 1 = predicate all, 2 = predicate half etc etc
 	if (gUsePredicate)
 	{
 		for (int j = 0; j < predDivisor; j++)
 		{
-			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			// Predication - Unique draw calls
+			directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
 			for (int i = j * state->numberOfObjects / predDivisor; i < (j + 1) * state->numberOfObjects / predDivisor; i++)
 			{
-				// Predication - Unique draw calls
 				directList->DrawInstanced(1, 1, i, 0);
 			}
+
+
 			// Predication - Instanced "large" draw calls
 			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
 			//directList->DrawInstanced(1, state->numberOfObjects / predDivisor, 0, 0);
@@ -960,6 +983,74 @@ void Renderer::renderTest(TestState* state)
 	SetWindowTextA(this->window, title.c_str());
 
 	this->CollectTimestamp(state, timeInMs);
+}
+
+void Renderer::renderGame(TestState* state)
+{
+	static int currentAllocatorIndex = 0;
+	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
+	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
+	ID3D12CommandAllocator* activeAllocator = directQueueAllocators[currentAllocatorIndex];
+	activeAllocator->Reset();
+	directList->Reset(activeAllocator, this->PSO);
+
+	directList->SetGraphicsRootSignature(rootSignature);
+	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
+
+	directList->RSSetViewports(1, &viewport);
+	directList->RSSetScissorRects(1, &scissorRect);
+	directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
+	directList->IASetVertexBuffers(0, 1, &state->vertexBufferView);
+
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_PRESENT,		//state before
+		D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
+	);
+
+
+	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
+	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
+	// Start timestamp
+	const int predDivisor = 1; // 1 = predicate all, 2 = predicate half etc etc
+	if (gUsePredicate)
+	{
+		for (int j = 0; j < predDivisor; j++)
+		{
+			for (int i = j * state->numberOfObjects / predDivisor; i < (j + 1) * state->numberOfObjects / predDivisor; i++)
+			{
+				directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+				// Predication - Unique draw calls
+				directList->DrawInstanced(1, 1, i, 0);
+			}
+			// Predication - Instanced "large" draw calls
+			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			//directList->DrawInstanced(1, state->numberOfObjects / predDivisor, 0, 0);
+		}
+
+	}
+	else
+	{
+		for (int i = 0; i < state->numberOfObjects; i++)
+		{
+			directList->DrawInstanced(1, 1, i, 0);
+		}
+		//directList->DrawInstanced(1, 50000000, 0, 0);
+	}
+
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
+		D3D12_RESOURCE_STATE_PRESENT		//state after
+	);
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->waitForDirectQueue();
+
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+	currentAllocatorIndex = ++currentAllocatorIndex % 2;
+	Present();
 }
 
 void Renderer::waitForDirectQueue()
