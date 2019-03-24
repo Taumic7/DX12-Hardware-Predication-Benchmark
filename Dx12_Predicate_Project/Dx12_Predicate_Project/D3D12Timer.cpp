@@ -1,5 +1,5 @@
 #pragma once
-
+// Timer class provided by Stefan Petersson
 #include "D3D12Timer.h"
 
 namespace D3D12

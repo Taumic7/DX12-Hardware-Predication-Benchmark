@@ -67,6 +67,7 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height, RenderUsage usag
 	// Start copy queue logic thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
 
+	// If in Game mode, launch Compute thread
 	if (renderUsage == RenderUsage::RENDER_GAME)
 	{
 		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
@@ -863,7 +864,7 @@ void Renderer::CollectTimestamp(TestState * state, double time)
 		state->timeStampSum /= 100;
 		// write to file
 		std::ofstream myfile;
-		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred2.boat");
+		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred.txt");
 		myfile.open(filename, std::ios_base::app);
 		myfile << std::to_string(state->timeStampSum) << std::endl;
 		if (this->currentState == 11)
@@ -1055,10 +1056,6 @@ void Renderer::renderGame(TestState* state)
 
 void Renderer::waitForDirectQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
-
 //Signal and increment the fence value.
 	const UINT64 fenceL = directFenceValue;
 	directQueue->Signal(directFence, fenceL);
@@ -1074,9 +1071,6 @@ void Renderer::waitForDirectQueue()
 
 void Renderer::waitForComputeQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
 	const UINT64 fenceL = computeFenceValue;
@@ -1093,9 +1087,6 @@ void Renderer::waitForComputeQueue()
 
 void Renderer::waitForCopyQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
 	const UINT64 fenceL = copyFenceValue;
