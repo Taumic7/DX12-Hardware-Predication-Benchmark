@@ -24,8 +24,10 @@ Renderer::~Renderer()
 {
 }
 
-void Renderer::Init(HINSTANCE hInstance, int width, int height)
+void Renderer::Init(HINSTANCE hInstance, int width, int height, RenderUsage usage)
 {
+	renderUsage = usage;
+
 	// Launch thread to create window
 	WindowThreadParams* paramTest = new WindowThreadParams(hInstance, 1200, 800, this);
 	// Start window + input thread
@@ -39,9 +41,9 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	{
 		//CreateHWND(hInstance, width, height); // Should be handled by thread
 		CreateDevice();
+		CreateFence();
 		CreateCMDInterface();
 		CreateSwapChain(); // Has lock to wait for window thread to finish
-		CreateFence();
 		CreateRenderTargets();
 		CreateViewportAndScissorRect(width, height);
 		CreateShaders();
@@ -49,10 +51,10 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 		CreatePSO();
 		CreateLogicBuffer();
 
-		const int set = 20;
+		const int set = 80;
 		const float ratio = (float)height / width;
 
-		for (int i = 0; i < 3; i++)
+		for (int i = 0; i < 12; i++)
 		{
 			states[i] = CreateTestState(set * (i + 1), set * ratio * (i + 1));
 		}
@@ -61,14 +63,21 @@ void Renderer::Init(HINSTANCE hInstance, int width, int height)
 	{
 		std::cout << e << std::endl;
 	}
+	gpuTimer.init(this->device, 1);
 	// Start copy queue logic thread
 	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticLogicThreadStart, (LPVOID)this, 0, NULL);
-	CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
+
+	// If in Game mode, launch Compute thread
+	if (renderUsage == RenderUsage::RENDER_GAME)
+	{
+		CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)this->StaticComputeThreadStart, (LPVOID)this, 0, NULL);
+	}
 }
 
 void Renderer::Run()
 {
 	MSG msg = { 0 };
+	bool testingDone = false;
 	while (WM_QUIT != msg.message)
 	{
 		// If "timestep" time has passed since we last moved, move again
@@ -77,7 +86,25 @@ void Renderer::Run()
 			Move();
 				
 		}
-		renderTest(states[currentState]);
+		if (states[currentState]->totalTimeStamps > 100 && !testingDone)
+		{
+			currentState++;
+		}
+
+		if (renderUsage == RENDER_GAME)
+		{
+			renderGame(states[currentState]);
+		}
+		else
+		{
+			renderTest(states[currentState]);
+		}
+
+		if (currentState >= 11 && !testingDone && states[currentState]->totalTimeStamps > 100)
+		{
+			testingDone = true;
+			std::cout << "Automated tests complete." << std::endl;
+		}
 	}
 }
 
@@ -165,13 +192,14 @@ void Renderer::CreateCMDInterface()
 	D3D12_COMMAND_QUEUE_DESC cqd = {};
 	device->CreateCommandQueue(&cqd, IID_PPV_ARGS(&directQueue));
 
-	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAlloc));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAllocators[0]));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&directQueueAllocators[1]));
 
 	// Create Command list
 	device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_DIRECT,
-		directQueueAlloc,
+		directQueueAllocators[0],
 		nullptr,
 		IID_PPV_ARGS(&directList));
 
@@ -184,12 +212,13 @@ void Renderer::CreateCMDInterface()
 	cqd2.Type = D3D12_COMMAND_LIST_TYPE_COMPUTE;
 	device->CreateCommandQueue(&cqd2, IID_PPV_ARGS(&computeQueue));
 
-	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeQueueAlloc));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeQueueAllocators[0]));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COMPUTE, IID_PPV_ARGS(&computeQueueAllocators[1]));
 
 	device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_COMPUTE,
-		computeQueueAlloc,
+		computeQueueAllocators[0],
 		nullptr,
 		IID_PPV_ARGS(&computeList));
 
@@ -201,16 +230,18 @@ void Renderer::CreateCMDInterface()
 	cqd3.Type = D3D12_COMMAND_LIST_TYPE_COPY;
 	device->CreateCommandQueue(&cqd3, IID_PPV_ARGS(&copyQueue));
 
-	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyQueueAlloc));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyQueueAllocators[0]));
+	device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_COPY, IID_PPV_ARGS(&copyQueueAllocators[1]));
 
 	device->CreateCommandList(
 		0,
 		D3D12_COMMAND_LIST_TYPE_COPY,
-		copyQueueAlloc,
+		copyQueueAllocators[0],
 		nullptr,
 		IID_PPV_ARGS(&copyList));
 
 	copyList->Close();
+
 
 }
 
@@ -235,7 +266,6 @@ void Renderer::CreateSwapChain()
 	scDesc.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
 
 	IDXGISwapChain1* swapChain1 = nullptr;
-
 	while (!this->windowCreated)
 	{
 		// Wait for window thread to be done.
@@ -606,7 +636,7 @@ void Renderer::CreateVertexBufferAndVertexData(TestState* state)
 	}
 
 	waitForDirectQueue();
-	directList->Reset(directQueueAlloc, nullptr);
+	directList->Reset(directQueueAllocators[0], nullptr);
 
 	// Copy from upload buffer to default buffer
 	//directList->CopyBufferRegion(state->vertexBufferResource, 0, uploadBuffer, 0, state->pointWidth * state->pointHeight * sizeof(Vertex));
@@ -694,12 +724,20 @@ void Renderer::CreatePredicateBuffer(TestState * state)
 	D3D12_RANGE range = { 0,0 };
 
 	state->predicateUploadResource->Map(0, &range, &dataBegin);
-	memset(dataBegin, (char)0, memSize);
-	//memset(dataBegin, (char)1, memSize/2.f);
+	
+	if (renderUsage == RENDER_GAME)
+	{
+		memset(dataBegin, (char)0, memSize);
+	}
+	else
+	{
+		memset(dataBegin, (char)1, memSize);
+		memset(dataBegin, (char)0, 8);
+	}
 	state->predicateUploadResource->Unmap(0, nullptr);
 
 	waitForDirectQueue();
-	directList->Reset(directQueueAlloc, nullptr);
+	directList->Reset(directQueueAllocators[1], nullptr);
 
 	directList->CopyBufferRegion(state->predicateResource, 0, state->predicateUploadResource, 0, memSize);
 
@@ -814,6 +852,32 @@ void Renderer::Move()
 	last_moved = clock.now();
 }
 
+void Renderer::CollectTimestamp(TestState * state, double time)
+{
+	if (state->totalTimeStamps < 100)
+	{
+		state->timeStampSum += time;
+		state->totalTimeStamps++;
+	}
+	else if (state->totalTimeStamps == 100)
+	{
+		state->timeStampSum /= 100;
+		// write to file
+		std::ofstream myfile;
+		std::string filename = std::string("Tests/") + /*std::to_string(state->numberOfObjects) + */std::string("drawAllNoPred.txt");
+		myfile.open(filename, std::ios_base::app);
+		myfile << std::to_string(state->timeStampSum) << std::endl;
+		if (this->currentState == 11)
+		{
+			myfile << std::endl;
+		}
+		myfile.close();
+		std::cout << std::to_string(currentState + 1) << std::string(":") <<  filename << " created." << std::endl;
+		state->totalTimeStamps++;
+	}
+
+}
+
 Renderer::TestState* Renderer::CreateTestState(int width, int height)
 {
 	TestState* newState = new TestState;
@@ -836,16 +900,14 @@ Renderer::TestState* Renderer::CreateTestState(int width, int height)
 
 void Renderer::renderTest(TestState* state)
 {
-
+	static int currentAllocatorIndex = 0;
 	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
 	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
-
-	this->waitForDirectQueue();
-	directQueueAlloc->Reset();
-	directList->Reset(directQueueAlloc, this->PSO);
+	ID3D12CommandAllocator* activeAllocator = directQueueAllocators[currentAllocatorIndex];
+	activeAllocator->Reset();
+	directList->Reset(activeAllocator, this->PSO);
 
 	directList->SetGraphicsRootSignature(rootSignature);
-
 	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
 
 	directList->RSSetViewports(1, &viewport);
@@ -862,15 +924,26 @@ void Renderer::renderTest(TestState* state)
 
 	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
 	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
-
+	// Start timestamp
+	this->gpuTimer.start(directList, 0);
+	const int predDivisor = 2; // 1 = predicate all, 2 = predicate half etc etc
 	if (gUsePredicate)
 	{
-		directList->SetPredication(state->predicateResource, 0, D3D12_PREDICATION_OP_EQUAL_ZERO);
-		for (int i = 0; i < state->numberOfObjects; i++)
+		for (int j = 0; j < predDivisor; j++)
 		{
-			//directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
-			directList->DrawInstanced(1, 1, i, 0);
+			// Predication - Unique draw calls
+			directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			for (int i = j * state->numberOfObjects / predDivisor; i < (j + 1) * state->numberOfObjects / predDivisor; i++)
+			{
+				directList->DrawInstanced(1, 1, i, 0);
+			}
+
+
+			// Predication - Instanced "large" draw calls
+			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			//directList->DrawInstanced(1, state->numberOfObjects / predDivisor, 0, 0);
 		}
+		
 	}
 	else
 	{
@@ -878,6 +951,92 @@ void Renderer::renderTest(TestState* state)
 		{
 			directList->DrawInstanced(1, 1, i, 0);
 		}
+		//directList->DrawInstanced(1, 50000000, 0, 0);
+	}
+	// Stop timestamp
+	this->gpuTimer.stop(directList, 0);
+	this->gpuTimer.resolveQueryToCPU(directList, 0);
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_RENDER_TARGET,	//state before
+		D3D12_RESOURCE_STATE_PRESENT		//state after
+	);
+	directList->Close();
+
+	ID3D12CommandList* listsToExecute[] = { directList };
+	this->waitForDirectQueue();
+
+	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
+	currentAllocatorIndex = ++currentAllocatorIndex % 2;
+	Present();
+	
+	//get time in ms
+	UINT64 queueFreq;
+	directQueue->GetTimestampFrequency(&queueFreq);
+	double timestampToMs = (1.0 / queueFreq) * 1000.0;
+
+	D3D12::GPUTimestampPair drawTime = gpuTimer.getTimestampPair(0);
+
+	UINT64 dt = drawTime.Stop - drawTime.Start;
+	double timeInMs = dt * timestampToMs;
+
+	std::string title = std::string("GPU time to execute ") + std::to_string(state->numberOfObjects) + std::string(" draw calls: ") + std::to_string(timeInMs) + std::string("ms");
+	SetWindowTextA(this->window, title.c_str());
+
+	this->CollectTimestamp(state, timeInMs);
+}
+
+void Renderer::renderGame(TestState* state)
+{
+	static int currentAllocatorIndex = 0;
+	D3D12_CPU_DESCRIPTOR_HANDLE cdh = renderTargetsHeap->GetCPUDescriptorHandleForHeapStart();
+	cdh.ptr += renderTargetDescriptorSize * currentRenderTarget;
+	ID3D12CommandAllocator* activeAllocator = directQueueAllocators[currentAllocatorIndex];
+	activeAllocator->Reset();
+	directList->Reset(activeAllocator, this->PSO);
+
+	directList->SetGraphicsRootSignature(rootSignature);
+	directList->SetGraphicsRoot32BitConstants(0, 2, state->pointSize, 0);
+
+	directList->RSSetViewports(1, &viewport);
+	directList->RSSetScissorRects(1, &scissorRect);
+	directList->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_POINTLIST);
+	directList->IASetVertexBuffers(0, 1, &state->vertexBufferView);
+
+	SetResourceTransitionBarrier(directList,
+		renderTargets[currentRenderTarget],
+		D3D12_RESOURCE_STATE_PRESENT,		//state before
+		D3D12_RESOURCE_STATE_RENDER_TARGET	//state after
+	);
+
+
+	directList->OMSetRenderTargets(1, &cdh, true, nullptr);
+	directList->ClearRenderTargetView(cdh, clearColor, 0, nullptr);
+	// Start timestamp
+	const int predDivisor = 1; // 1 = predicate all, 2 = predicate half etc etc
+	if (gUsePredicate)
+	{
+		for (int j = 0; j < predDivisor; j++)
+		{
+			for (int i = j * state->numberOfObjects / predDivisor; i < (j + 1) * state->numberOfObjects / predDivisor; i++)
+			{
+				directList->SetPredication(state->predicateResource, i * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+				// Predication - Unique draw calls
+				directList->DrawInstanced(1, 1, i, 0);
+			}
+			// Predication - Instanced "large" draw calls
+			//directList->SetPredication(state->predicateResource, j * 8, D3D12_PREDICATION_OP_EQUAL_ZERO);
+			//directList->DrawInstanced(1, state->numberOfObjects / predDivisor, 0, 0);
+		}
+
+	}
+	else
+	{
+		for (int i = 0; i < state->numberOfObjects; i++)
+		{
+			directList->DrawInstanced(1, 1, i, 0);
+		}
+		//directList->DrawInstanced(1, 50000000, 0, 0);
 	}
 
 	SetResourceTransitionBarrier(directList,
@@ -888,17 +1047,15 @@ void Renderer::renderTest(TestState* state)
 	directList->Close();
 
 	ID3D12CommandList* listsToExecute[] = { directList };
+	this->waitForDirectQueue();
+
 	this->directQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
-	
+	currentAllocatorIndex = ++currentAllocatorIndex % 2;
 	Present();
 }
 
 void Renderer::waitForDirectQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
-
 //Signal and increment the fence value.
 	const UINT64 fenceL = directFenceValue;
 	directQueue->Signal(directFence, fenceL);
@@ -914,9 +1071,6 @@ void Renderer::waitForDirectQueue()
 
 void Renderer::waitForComputeQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
 	const UINT64 fenceL = computeFenceValue;
@@ -933,9 +1087,6 @@ void Renderer::waitForComputeQueue()
 
 void Renderer::waitForCopyQueue()
 {
-	//WAITING FOR EACH FRAME TO COMPLETE BEFORE CONTINUING IS NOT BEST PRACTICE.
-//This is code implemented as such for simplicity. The cpu could for example be used
-//for other tasks to prepare the next frame while the current one is being rendered.
 
 //Signal and increment the fence value.
 	const UINT64 fenceL = copyFenceValue;
@@ -983,16 +1134,42 @@ DWORD Renderer::HandleInputThread(LPVOID lpParam)
 			case WM_KEYDOWN:
 				switch (msg.wParam)
 				{
-				case VK_F1:
+				case VK_NUMPAD0:
 					currentState = 0;
 					break;
-				case VK_F2:
+				case VK_NUMPAD1:
 					currentState = 1;
 					break;
-				case VK_F3:
+				case VK_NUMPAD2:
 					currentState = 2;
 					break;
-
+				case VK_NUMPAD3:
+					currentState = 3;
+					break;
+				case VK_NUMPAD4:
+					currentState = 4;
+					break;
+				case VK_NUMPAD5:
+					currentState = 5;
+					break;
+				case VK_NUMPAD6:
+					currentState = 6;
+					break;
+				case VK_NUMPAD7:
+					currentState = 7;
+					break;
+				case VK_NUMPAD8:
+					currentState = 8;
+					break;
+				case VK_NUMPAD9:
+					currentState = 9;
+					break;
+				case VK_DIVIDE:
+					currentState = 10;
+					break;
+				case VK_MULTIPLY:
+					currentState = 11;
+					break;
 				case VK_SPACE:
 					gUsePredicate = !gUsePredicate;
 					break;
@@ -1021,11 +1198,14 @@ DWORD Renderer::CopyLogicThread()
 {
 	LogicBuffer lastUpdate = {};
 	LogicBuffer oldState = {};
+	ID3D12CommandAllocator* activeAllocator = nullptr;
+	unsigned int currentAllocatorIndex = 0;
 	while (true)
 	{
 		oldState = states[currentState]->logicBuffer;
 		if ((lastUpdate.x != oldState.x) || lastUpdate.y != oldState.y)
 		{
+			activeAllocator = this->copyQueueAllocators[currentAllocatorIndex];
 			void* dataBegin = nullptr;
 			D3D12_RANGE range = { 0,0 };
 
@@ -1033,17 +1213,19 @@ DWORD Renderer::CopyLogicThread()
 			memcpy(dataBegin, &states[currentState]->logicBuffer, sizeof(LogicBuffer));
 			logicUploadResource->Unmap(0, nullptr);
 
-			waitForCopyQueue();
 
-			copyQueueAlloc->Reset();
-			copyList->Reset(copyQueueAlloc, nullptr);
+
+			activeAllocator->Reset();
+			copyList->Reset(activeAllocator, nullptr);
 			copyList->CopyResource(logicBufferResource, logicUploadResource);
 			copyList->Close();
 
 			ID3D12CommandList* listsToExecute[] = { copyList };
+			waitForCopyQueue();
 			this->copyQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute), listsToExecute);
 			lastUpdate = oldState;
 			newData = true;
+			currentAllocatorIndex = ++currentAllocatorIndex % 2;
 		}
 	}
 
@@ -1053,13 +1235,17 @@ DWORD Renderer::CopyLogicThread()
 
 DWORD Renderer::ComputeThread()
 {
+	unsigned int currentAllocatorIndex = 0;
+	ID3D12CommandAllocator* activeAllocator = nullptr;
 	while (true)
 	{
+
 		if (newData)
 		{
-			this->waitForComputeQueue();
-			computeQueueAlloc->Reset();
-			computeList->Reset(computeQueueAlloc, this->computePSO);
+			activeAllocator = this->computeQueueAllocators[currentAllocatorIndex];
+
+			activeAllocator->Reset();
+			computeList->Reset(activeAllocator, this->computePSO);
 			computeList->SetComputeRootSignature(this->computeRootSignature);
 			computeList->SetComputeRootUnorderedAccessView(0, states[currentState]->predicateResource->GetGPUVirtualAddress());
 			computeList->SetComputeRootConstantBufferView(1, logicBufferResource->GetGPUVirtualAddress());
@@ -1070,8 +1256,10 @@ DWORD Renderer::ComputeThread()
 			//-----------------------------------------------
 			computeList->Close();
 			ID3D12CommandList* listsToExecute2[] = { computeList };
+			this->waitForComputeQueue();
 			this->computeQueue->ExecuteCommandLists(ARRAYSIZE(listsToExecute2), listsToExecute2);
 			newData = false;
+			currentAllocatorIndex = ++currentAllocatorIndex % 2;
 		}
 		
 

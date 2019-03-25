@@ -4,8 +4,12 @@
 #include <d3dcompiler.h>
 #include <windows.h>
 #include <iostream>
+#include <fstream>
 #include <chrono>
 #include <thread>
+#include <vector>
+#include <string>
+#include "D3D12Timer.h"
 
 //#include <thread>
 //#include <mutex>
@@ -58,6 +62,8 @@ enum DIRECTION
 	RIGHT
 };
 
+enum RenderUsage { RENDER_GAME, RENDER_TEST };
+
 //static int gCurrentState;
 //static bool gStateIsChanged;
 //static bool gLogicIsUpdated;
@@ -81,6 +87,8 @@ class Renderer
 		}
 	};
 
+	// Thread functions
+
 	static DWORD WINAPI StaticWindowTheadStart(void* Param)
 	{
 		WindowThreadParams* params = (WindowThreadParams*)Param;
@@ -103,7 +111,7 @@ public:
 	Renderer();
 	~Renderer();
 
-	void Init(HINSTANCE hInstance, int width, int height);
+	void Init(HINSTANCE hInstance, int width, int height, RenderUsage usage);
 	void Run();
 
 	DWORD HandleInputThread(LPVOID threadParams);
@@ -111,11 +119,10 @@ public:
 	DWORD ComputeThread();
 
 private:
-	// Temporary solution?
 	bool windowCreated = false;
 
 	bool newData = false;
-
+	RenderUsage renderUsage;
 
 	std::chrono::high_resolution_clock clock;
 	float pointSize[3][2] = {};
@@ -145,6 +152,7 @@ private:
 		float pointSize[2] = {};
 		int pointWidth, pointHeight;
 		unsigned int numberOfObjects = 0;
+		double timeStampSum = 0, totalTimeStamps = 0;
 	};
 
 	bool quit = false;
@@ -154,7 +162,7 @@ private:
 	DIRECTION currentDirection;
 
 
-	TestState* states[3] = {};
+	TestState* states[12] = {};
 
 	HWND			window;
 	D3D12_VIEWPORT	viewport = {};
@@ -173,15 +181,15 @@ private:
 	UINT						renderTargetDescriptorSize = 0;
 
 	ID3D12CommandQueue*			directQueue	= nullptr;
-	ID3D12CommandAllocator*		directQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		directQueueAllocators[2];
 	ID3D12GraphicsCommandList3*	directList = nullptr;
 
 	ID3D12CommandQueue*			computeQueue = nullptr;
-	ID3D12CommandAllocator*		computeQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		computeQueueAllocators[2];
 	ID3D12GraphicsCommandList3* computeList = nullptr;
 
 	ID3D12CommandQueue*			copyQueue = nullptr;
-	ID3D12CommandAllocator*		copyQueueAlloc = nullptr;
+	ID3D12CommandAllocator*		copyQueueAllocators[2];
 	ID3D12GraphicsCommandList3* copyList = nullptr;
 
 	ID3D12Resource1*			logicBufferResource = nullptr;
@@ -194,6 +202,8 @@ private:
 
 	ID3D12DescriptorHeap*		resourceHeap = nullptr;
 	unsigned int				resourceHeapSize = 0;
+
+	D3D12::D3D12Timer			gpuTimer;
 
 	ID3D12Fence1* directFence = nullptr;
 	HANDLE directEventHandle = nullptr;
@@ -223,9 +233,12 @@ private:
 	void Present();
 
 	void Move();
+	void CollectTimestamp(TestState* state, double time);
 
 	TestState* CreateTestState(int width, int height);
 	void renderTest(TestState* state);
+
+	void renderGame(TestState* state);
 
 	// void UpdateLogicBuffer();
 
